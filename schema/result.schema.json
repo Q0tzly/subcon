@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "partial", "blocked"],
+      "description": "done only if every Acceptance command passed"
+    },
+    "summary": { "type": "string" },
+    "files_changed": { "type": "array", "items": { "type": "string" } },
+    "commands_run": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "exit_code": { "type": "integer" },
+          "note": { "type": "string" }
+        },
+        "required": ["command", "exit_code"]
+      }
+    },
+    "design_questions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ambiguities or contradictions in the ticket, and the choice you made"
+    },
+    "issues_found": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Problems noticed outside the ticket's scope"
+    }
+  },
+  "required": ["status", "summary", "files_changed", "commands_run", "design_questions", "issues_found"]
+}
