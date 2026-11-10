@@ -19,6 +19,8 @@
 | 13 | 履歴と stats の tokens に cache_read / thinking を足す（ベンチマーク事前準備） | Flash | `lib/history.sh` `lib/stats.sh` |
 | 14 | agy の事前確認と解決（PATH に無ければ `~/.local/bin/agy`、無ければジョブを作らず終了コード 1） | Flash | `lib/common.sh` `lib/job.sh` `runners/local` |
 | 15 | agy の認証方式の検出と警告（消費者ログインなら `submit` / `resume` 前に警告、API キー方式なら無言） | Flash | `lib/common.sh` `lib/job.sh` |
+| 16 | container ランナー本体（設計は ../container-runner.md） | Flash | `runners/container` `runners/container-entry.sh` `container/Containerfile` |
+| 17 | container の事前確認（エンジンとイメージが無ければジョブを作らず終了コード 1） | Flash | `lib/common.sh` `lib/job.sh` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
