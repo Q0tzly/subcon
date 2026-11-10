@@ -75,7 +75,8 @@ teardown() {
 
 jobdir() { echo "$SUBCON_STATE/jobs/$1"; }
 jobcount() { find "$SUBCON_STATE/jobs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' '; }
-result() { jq -r "$2" "$(jobdir "$1")/result.json"; }
+# result <id> [jq opts] <filter>
+result() { local id=$1; shift; jq -r "$@" "$(jobdir "$id")/result.json"; }
 worktrees() { git -C "$REPO" worktree list | wc -l | tr -d ' '; }
 
 # wait_done <id>: poll (without cmd_wait) until the job has a result, up to 30s.
