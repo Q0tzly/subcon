@@ -1,153 +1,52 @@
 #!/bin/bash
-# Hand one ticket (see docs/delegation.md) to Gemini Flash via agy, then check
-# that it stayed inside the ticket: no commits, no files outside "## Files".
-# The caller still has to review the diff and run the Acceptance commands.
+# Hand implementation tickets to Gemini Flash as jobs. See docs/design/v2.md.
 set -euo pipefail
 
 SELF="$0"
-[[ -L "$SELF" ]] && SELF="$(readlink "$SELF")"
-ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
-SCHEMA="$ROOT/schema/result.schema.json"
-MODEL="${SUBCON_MODEL:-gemini-3.8-flash-medium}"
-COAUTHOR_EMAIL="${SUBCON_COAUTHOR_EMAIL:-noreply@google.com}"
+while [[ -L "$SELF" ]]; do SELF="$(readlink "$SELF")"; done
+SUBCON_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+export SUBCON_ROOT
+
+for f in common ticket job query manage; do
+  # shellcheck source=/dev/null
+  source "$SUBCON_ROOT/lib/$f.sh"
+done
 
 usage() {
-  cat <<USAGE
-usage: subcon run [--model M] [--timeout 30m] [--allow-dirty] [--no-sandbox] <ticket.md>
+  cat >&2 <<USAGE
+usage: subcon new <feature>/<NN-name>
+       subcon submit [--runner R] [--model M] [--timeout T] <ticket>...
+       subcon wait [--timeout SEC] <id>...
+       subcon run [--runner R] [--model M] [--timeout T] <ticket>
+       subcon show <id>
+       subcon list [--all]
+       subcon diff <id>
+       subcon apply <id>
+       subcon discard <id>...
+       subcon guide
        subcon trailer [--model M]
 
-exit: 0 done / 2 Flash reported partial or blocked / 3 went outside the ticket
-env:  SUBCON_MODEL (default $MODEL), SUBCON_COAUTHOR_EMAIL (default $COAUTHOR_EMAIL)
+exit: 0 ok / 1 usage / 2 partial or blocked / 3 check failed / 4 job failed / 5 wait timed out
 USAGE
   exit 1
 }
 
-# "Gemini 3.8 Flash (Medium)" -> "Gemini 3.8 Flash"
-model_name() {
-  agy models 2>/dev/null | awk -F'\t' -v id="$MODEL" '$1 == id { sub(/ \([^)]*\)$/, "", $2); print $2 }'
-}
+command -v jq >/dev/null || die "jq not found"
 
-trailer() {
-  local name
-  name="$(model_name)"
-  [[ -n "$name" ]] || { echo "unknown model: $MODEL (see: agy models)" >&2; exit 1; }
-  echo "Co-Authored-By: $name <$COAUTHOR_EMAIL>"
-}
-
-# Paths listed as "- path" (backticks optional) under "## Files".
-ticket_files() {
-  awk '/^## /{ in_files = ($0 ~ /^## Files[[:space:]]*$/); next }
-       in_files && /^[[:space:]]*[-*][[:space:]]+/ {
-         sub(/^[[:space:]]*[-*][[:space:]]+/, ""); gsub(/`/, ""); sub(/[[:space:]].*$/, ""); print
-       }' "$1"
-}
-
-# Changes since <base> (including commits on top of it) plus untracked files.
-changed_files() {
-  { git diff --name-only "$1"; git ls-files --others --exclude-standard; } | sort -u
-}
-
-# Headless mode auto-denies anything not allowed, which aborts the whole run,
-# so allow every command and deny the ones that change git state or reach out.
-# Rules match whole words as a prefix: command(git commit) covers "git commit -m x".
-# agy has no CLI setting to forbid BypassSandbox, and command(*) also approves
-# unsandboxed runs; the deny list applies to those too.
-SETTINGS='{"permissions":{
-  "allow":["command(*)"],
-  "deny":[
-    "command(git commit)","command(git add)","command(git reset)","command(git checkout)",
-    "command(git switch)","command(git restore)","command(git stash)","command(git rebase)",
-    "command(git merge)","command(git push)","command(git clean)","command(git branch)",
-    "command(git tag)","command(git rm)","command(git mv)","command(gh)","command(sudo)",
-    "command(rm -rf)","command(rm -fr)"
-  ]}}'
-
-PREAMBLE='You are implementing exactly one step of a larger design. The ticket below is the full specification.
-
-Rules:
-- Modify or create only the files listed under "## Files". If another file must change, do not change it: stop and explain in design_questions.
-- Do not run any git command that changes state (commit, add, reset, checkout, stash, push, rebase). The reviewer commits after checking your work.
-- Implement exactly the "## Interface". Do not add public API that is not listed there.
-- Run every command under "## Acceptance" yourself and report each one in commands_run with its real exit code.
-- You may add extra tests, but only inside the listed files.
-- When the ticket is ambiguous, pick the most conservative reading and record the question and your choice in design_questions.
-- Record problems you notice outside this ticket in issues_found instead of fixing them.
-- Set status to "done" only if every Acceptance command passed. Use "partial" or "blocked" otherwise, and say why in summary.
-
---- TICKET ---
-'
-
-main() {
-  local timeout=30m allow_dirty=0 sandbox=(--sandbox) ticket=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --model) MODEL="${2:?--model needs a value}"; shift ;;
-      --timeout) timeout="${2:?--timeout needs a value}"; shift ;;
-      --allow-dirty) allow_dirty=1 ;;
-      --no-sandbox) sandbox=() ;;
-      -h|--help) usage ;;
-      -*) echo "unknown flag: $1" >&2; usage ;;
-      *) [[ -z "$ticket" ]] || usage; ticket="$1" ;;
-    esac
-    shift
-  done
-  [[ -n "$ticket" && -f "$ticket" ]] || usage
-  command -v agy >/dev/null || { echo "agy not found" >&2; exit 1; }
-  command -v jq >/dev/null || { echo "jq not found" >&2; exit 1; }
-
-  ticket="$(cd "$(dirname "$ticket")" && pwd)/$(basename "$ticket")"
-  cd "$(git rev-parse --show-toplevel)"
-  local allowed
-  allowed="$(ticket_files "$ticket" | sort -u)"
-  [[ -n "$allowed" ]] || { echo "ticket has no '## Files' list: $ticket" >&2; exit 1; }
-
-  local base before=""
-  base="$(git rev-parse HEAD)"
-  if [[ -n "$(changed_files "$base")" ]]; then
-    [[ $allow_dirty -eq 1 ]] || { echo "working tree is dirty; commit first or pass --allow-dirty" >&2; exit 1; }
-    before="$(changed_files "$base")"
-  fi
-
-  local log_dir out
-  log_dir="$(git rev-parse --git-dir)/subcon"
-  mkdir -p "$log_dir"
-  out="$log_dir/$(date +%Y%m%d-%H%M%S)-$(basename "$ticket" .md).json"
-
-  echo "==> $MODEL: $(basename "$ticket")" >&2
-  agy -p "$PREAMBLE$(cat "$ticket")" \
-    --model "$MODEL" --mode accept-edits "${sandbox[@]}" --settings "$SETTINGS" \
-    --output-format json --json-schema "$SCHEMA" \
-    --disable-slash-commands --print-timeout "$timeout" > "$out"
-  echo "==> raw output: $out" >&2
-
-  jq '.structured_output' "$out"
-
-  local rc=0 status
-  status="$(jq -r '.structured_output.status // "missing"' "$out")"
-  [[ "$status" == "done" ]] || { echo "!! Flash status: $status" >&2; rc=2; }
-
-  if [[ "$(git rev-parse HEAD)" != "$base" ]]; then
-    echo "!! HEAD moved (Flash committed): $base -> $(git rev-parse HEAD)" >&2
-    rc=3
-  fi
-  local outside
-  outside="$(comm -23 <(changed_files "$base") <(printf '%s\n' "$before" "$allowed" | sort -u))"
-  if [[ -n "$outside" ]]; then
-    echo "!! changed outside ## Files:" >&2
-    sed 's/^/   /' <<<"$outside" >&2
-    rc=3
-  fi
-
-  echo "==> changes (review the diff and rerun Acceptance yourself):" >&2
-  git status --short >&2
-  exit "$rc"
-}
-
-case "${1:-}" in
-  trailer)
-    shift
-    [[ "${1:-}" == "--model" ]] && MODEL="${2:?--model needs a value}"
-    trailer ;;
-  run) shift; main "$@" ;;
+cmd="${1:-}"
+[[ $# -gt 0 ]] && shift
+case "$cmd" in
+  new) cmd_new "$@" ;;
+  guide) cmd_guide "$@" ;;
+  submit) cmd_submit "$@" ;;
+  wait) cmd_wait "$@" ;;
+  run) cmd_run "$@" ;;
+  show) cmd_show "$@" ;;
+  list) cmd_list "$@" ;;
+  diff) cmd_diff "$@" ;;
+  apply) cmd_apply "$@" ;;
+  discard) cmd_discard "$@" ;;
+  trailer) cmd_trailer "$@" ;;
+  __exec) job_exec "$@" ;;
   *) usage ;;
 esac
