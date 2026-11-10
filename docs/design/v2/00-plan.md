@@ -11,6 +11,7 @@
 | 05 | `wait` `show` `run` とランナー消失の検出 | Flash | `lib/query.sh` |
 | 06 | `list` `diff` `apply` `discard` | Flash | `lib/manage.sh` |
 | 07 | `docs/delegation.md` と README を v2 に合わせる | 上位 | `docs/` `README.md` |
+| 08 | 中断からの再開 `subcon resume`（v2.1、設計は ../v2.md の「今後」） | 未定 | 未定 |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
