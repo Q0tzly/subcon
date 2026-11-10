@@ -666,6 +666,15 @@ test_history_failed_apply_no_event() {
   assert_eq "$(wc -l < "$(hist)" | tr -d ' ')" 1 "no event line"
 }
 
+test_history_stale_lock() {
+  mkdir -p "$SUBCON_STATE/history.jsonl.lock"
+  touch -t 202001010000 "$SUBCON_STATE/history.jsonl.lock"
+  sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(wc -l < "$(hist)" | tr -d ' ')" 1 "line written past a stale lock"
+  [[ ! -e "$SUBCON_STATE/history.jsonl.lock" ]] || fail "lock left behind"
+}
+
 test_history_parallel() {
   export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=1
   write_ticket docs/t/02-b.md b.txt

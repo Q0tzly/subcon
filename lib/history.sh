@@ -18,6 +18,12 @@ _history_append() {
       locked=1
       break
     fi
+    # The lock is held for one append; one older than a minute was left by a
+    # killed process and would otherwise block history forever.
+    if [[ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+      rmdir "$lock" 2>/dev/null || true
+      continue
+    fi
     sleep 0.1
   done
 
