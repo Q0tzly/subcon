@@ -15,7 +15,8 @@
 | 09 | 使用統計の土台（呼び出し口・空実装・合格テスト） | 上位 | `lib/job.sh` `lib/manage.sh` `bin/subcon` `tests/` |
 | 10 | 使用履歴の記録 | Flash | `lib/history.sh` |
 | 11 | `subcon stats` | Flash | `lib/stats.sh` |
-| 12 | モデル別のベンチマーク（計画は ../benchmark.md。実施時期はユーザーが決める） | 未定 | 未定 |
+| 12 | モデル別のベンチマーク（計画は ../benchmark.md。縮小版から実施） | 未定 | 未定 |
+| 13 | 履歴と stats の tokens に cache_read / thinking を足す（ベンチマーク事前準備） | Flash | `lib/history.sh` `lib/stats.sh` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
