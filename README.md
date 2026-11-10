@@ -32,6 +32,17 @@ subcon trailer                     # コミット用の Co-Authored-By 行
 
 ほかに `run`（submit + wait）、`show`、`list`、`resume`（失敗したジョブを agy の会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
 
+### container ランナー
+
+`--runner container` を付けると、agy を使い捨てコンテナの中で実行する（ジョブの `work/` と認証用ディレクトリ以外はコンテナから書けない）。docker か podman が必要。
+
+```sh
+docker build -f container/Containerfile -t subcon-runner:latest .
+subcon submit --runner container <ticket>...
+```
+
+イメージはリポジトリのルートからビルドする。agy バイナリはイメージに同梱されず、ビルド時に公式インストーラから取得される。設計は [docs/design/container-runner.md](docs/design/container-runner.md)。
+
 終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
 
 ## Muse から使う
@@ -51,4 +62,5 @@ tests/run.sh submit     # グループ指定: ticket submit query manage history
 
 ## 現状の制約
 
-- agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。隔離した実行環境（コンテナ / Mac mini）のランナーを予定
+- local ランナーでは、agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。隔離が必要なときは container ランナーを使う。container ランナーでもネットワークは隔離されない（agy が API に到達するため）
+- agy の認証が消費者向け Google ログインの場合、`submit` / `resume` は警告を出す。消費者プランのログインをサードパーティ製エージェントから使うことは Antigravity の規約で認められておらず、アカウント停止の対象になりうる。API キー方式（`modelProvider: gemini` ＋ `GEMINI_API_KEY`）か、自分自身のスクリプト／CI からの利用がサポートされる形（詳細は docs/delegation.md）
