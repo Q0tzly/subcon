@@ -1087,10 +1087,11 @@ test_container_run_ok() {
 }
 
 test_container_engine_missing() {
+  # Since ticket 17, a missing engine is a preflight failure: no job, exit 1.
   SUBCON_CONTAINER_ENGINE=/nonexistent/engine sub run --runner container docs/t/01-a.md
-  assert_rc 4 || return 1
-  assert_eq "$(jget .state)" failed state
-  assert_match "$(jget .error)" 'runner exited with [1-9]' error
+  assert_rc 1 || return 1
+  grep -q "engine" "$T/err" || fail "stderr does not mention engine: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
 }
 
 test_container_api_key_env() {
