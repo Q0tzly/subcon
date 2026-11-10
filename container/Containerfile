@@ -1,0 +1,19 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash runner
+
+COPY runners/container-entry.sh /usr/local/bin/subcon-entry
+RUN chmod +x /usr/local/bin/subcon-entry
+
+USER runner
+ENV PATH="/home/runner/.local/bin:${PATH}"
+
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash

@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+
+job_dir="${1:?job directory required}"
+[[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
+[[ -d "$job_dir" ]] || { echo "runners/container: job directory not found: $job_dir" >&2; exit 1; }
+
+if [[ -n "${SUBCON_CONTAINER_ENGINE:-}" ]]; then
+  engine="$SUBCON_CONTAINER_ENGINE"
+elif command -v docker >/dev/null 2>&1; then
+  engine="docker"
+elif command -v podman >/dev/null 2>&1; then
+  engine="podman"
+else
+  echo "runners/container: container engine not found (docker or podman required)" >&2
+  exit 1
+fi
+
+job_id="$(basename "$job_dir")"
+name="subcon-$job_id"
+image="${SUBCON_CONTAINER_IMAGE:-subcon-runner:latest}"
+
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM HUP
+  "$engine" rm -f "$name" >/dev/null 2>&1 || true
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 143' INT TERM HUP
+
+cp "$SUBCON_SCHEMA" "$job_dir/schema.json"
+home_dir="${HOME:-$PWD}"
+mkdir -p "$home_dir/.gemini"
+
+extra_env=()
+if [[ -n "${SUBCON_CONVERSATION:-}" ]]; then
+  extra_env+=(-e SUBCON_CONVERSATION)
+fi
+if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+  extra_env+=(-e GEMINI_API_KEY)
+fi
+
+rc=0
+"$engine" run --rm --name "$name" \
+  --workdir /work \
+  --user "$(id -u):$(id -g)" \
+  -v "$job_dir/work:/work" -v "$job_dir:/job" -v "$home_dir/.gemini:/home/runner/.gemini" \
+  -e HOME=/home/runner -e SUBCON_JOB_DIR=/job \
+  -e SUBCON_PROMPT_FILE=/job/prompt.txt -e SUBCON_SCHEMA=/job/schema.json \
+  -e SUBCON_SETTINGS -e SUBCON_MODEL -e SUBCON_TIMEOUT \
+  ${extra_env[@]+"${extra_env[@]}"} \
+  "$image" /usr/local/bin/subcon-entry || rc=$?
+
+exit "$rc"
