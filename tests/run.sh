@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats resume (all when none given).
+# Groups: ticket submit query manage history stats resume preflight (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -79,6 +79,29 @@ teardown() {
     [[ -f "$p" ]] && killtree "$(cat "$p")"
   done
   rm -rf "$T" 2>/dev/null || { sleep 0.5; rm -rf "$T"; }
+}
+
+# clean_path: PATH without the fake-agy dir and without $HOME/.local/bin,
+# so a test can simulate "agy is not on PATH" and control $HOME freely.
+clean_path() {
+  local p=":$PATH:"
+  p="${p//:$FAKEBIN:/:}"
+  p="${p//:$HOME/.local/bin:/:}"
+  p="${p#:}"
+  p="${p%:}"
+  printf '%s' "$p"
+}
+
+# preflight_home <with-agy|no-agy>: a throwaway HOME; with-agy puts the fake
+# agy at $HOME/.local/bin/agy (and nowhere on PATH).
+preflight_home() {
+  local h="$T/home-$1"
+  mkdir -p "$h"
+  if [[ "$1" == with-agy ]]; then
+    mkdir -p "$h/.local/bin"
+    ln -s "$ROOT/tests/fake-agy" "$h/.local/bin/agy"
+  fi
+  printf '%s' "$h"
 }
 
 jobdir() { echo "$SUBCON_STATE/jobs/$1"; }
@@ -928,10 +951,53 @@ test_resume_history() {
   assert_eq "$(jq -r --arg id "$new" 'select(.type == "job" and .id == $id) | .resume_of' "$SUBCON_STATE/history.jsonl")" "$ID" resume_of
 }
 
+# ---- preflight (14) --------------------------------------------------------
+
+test_preflight_missing_submit() {
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" sub submit docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "agy" "$T/err" || fail "stderr does not mention agy: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_preflight_missing_trailer() {
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" sub trailer
+  assert_rc 1 || return 1
+  grep -q "agy not found" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
+test_preflight_missing_guide_ok() {
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" sub guide
+  assert_rc 0 || return 1
+  [[ -n "$OUT" ]] || fail "guide printed nothing"
+}
+
+test_preflight_fallback_run() {
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home with-agy)"
+  HOME="$h" PATH="$cp" sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .state)" finished state
+  assert_eq "$(jget .status)" done status
+  HOME="$h" PATH="$cp" sub trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

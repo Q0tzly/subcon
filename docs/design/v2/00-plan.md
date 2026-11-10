@@ -17,6 +17,7 @@
 | 11 | `subcon stats` | Flash | `lib/stats.sh` |
 | 12 | モデル別のベンチマーク（計画は ../benchmark.md。縮小版から実施） | 未定 | 未定 |
 | 13 | 履歴と stats の tokens に cache_read / thinking を足す（ベンチマーク事前準備） | Flash | `lib/history.sh` `lib/stats.sh` |
+| 14 | agy の事前確認と解決（PATH に無ければ `~/.local/bin/agy`、無ければジョブを作らず終了コード 1） | Flash | `lib/common.sh` `lib/job.sh` `runners/local` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
