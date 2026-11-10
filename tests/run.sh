@@ -843,6 +843,18 @@ test_resume_no_conversation_when_agy_silent() {
   assert_eq "$(result "$ID" .agy_error)" null agy_error
 }
 
+test_resume_after_kill() {
+  FAKE_AGY_MODE=killed submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .state)" failed state
+  assert_eq "$(result "$ID" .conversation)" conv-fake-1 conversation
+  assert_match "$(result "$ID" .agy_error)" 'without a result' agy_error
+  sub resume "$ID"
+  assert_rc 0 || return 1
+  wait_done "$(jget '.[0].id')" || return 1
+  assert_eq "$(result "$(jget '.[0].id')" .state)" finished state
+}
+
 test_resume_ok() {
   failed_job || return 1
   local old=$ID log="$T/agy.log"
