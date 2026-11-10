@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats resume preflight authwarn container (all when none given).
+# Groups: ticket submit query manage history stats resume preflight authwarn container containerpre (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,7 +10,7 @@ ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
 unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING
-unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY
+unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
@@ -1128,10 +1128,39 @@ test_container_resume() {
   grep -q -- "--conversation conv-fake-1" "$T/agy.log" || fail "no --conversation: $(cat "$T/agy.log")"
 }
 
+# ---- containerpre (17) -----------------------------------------------------
+
+test_containerpre_engine_missing() {
+  SUBCON_CONTAINER_ENGINE=/nonexistent/engine sub submit --runner container docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "engine" "$T/err" || fail "stderr does not mention engine: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_containerpre_image_missing() {
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_NO_IMAGE=1 sub submit --runner container docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "image" "$T/err" || fail "stderr does not mention image: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_containerpre_ok() {
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    sub submit --runner container docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jobcount)" 1 jobs
+}
+
+test_containerpre_local_unaffected() {
+  SUBCON_CONTAINER_ENGINE=/nonexistent/engine sub submit docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jobcount)" 1 jobs
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container containerpre)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

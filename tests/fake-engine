@@ -16,6 +16,15 @@ cmd="${1:-}"
 if [[ $# -gt 0 ]]; then shift; fi
 case "$cmd" in
   rm) log "RM $*"; exit 0 ;;
+  image)
+    # `image inspect <name>`: present unless FAKE_ENGINE_NO_IMAGE is set.
+    if [[ -n "${FAKE_ENGINE_NO_IMAGE:-}" ]]; then
+      echo "fake-engine: no such image" >&2
+      exit 1
+    fi
+    echo '[{}]'
+    exit 0
+    ;;
   run) ;;
   *) echo "fake-engine: unsupported command: $cmd" >&2; exit 1 ;;
 esac
