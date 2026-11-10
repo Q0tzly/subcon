@@ -30,7 +30,7 @@ subcon guide                       # ルール（docs/delegation.md）を表示
 subcon trailer                     # コミット用の Co-Authored-By 行
 ```
 
-ほかに `run`（submit + wait）、`show`、`list`、`resume`（失敗したジョブを agy の会話ごと再開）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
+ほかに `run`（submit + wait）、`show`、`list`、`resume`（失敗したジョブを agy の会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
 
 終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
 
@@ -44,7 +44,7 @@ dotfiles を入れていれば、`ai/AGENTS.md` が `~/.claude/CLAUDE.md`、`~/.
 
 ```sh
 tests/run.sh            # 全テスト（本物の agy は使わない）
-tests/run.sh submit     # グループ指定: ticket submit query manage
+tests/run.sh submit     # グループ指定: ticket submit query manage history stats resume
 ```
 
 設計は [docs/design/v2.md](docs/design/v2.md)、作業票は [docs/design/v2/](docs/design/v2/)。

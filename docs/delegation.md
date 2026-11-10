@@ -102,8 +102,8 @@ stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは 
 
 ### 中断したジョブの再開
 
-ネットワークエラーなどで落ちたときは、agy の会話が残っていれば続きから再開できる（`subcon resume` は v2.1 で実装予定）。
-今は手で: ジョブの `agy.json` の `conversation_id` を控え、新しいジョブの worktree で `agy --conversation <ID> -p "中断された。作業ツリーを確認して続けろ"` を実行する。
+ネットワークエラーなどで落ちたときは、`subcon resume <id>` で続きから再開できる（v2.1 で実装済み）。
+対象は `state: failed` で結果の `conversation` が `null` でないジョブ。再開は新しいジョブとして発行されるので、新しい ID を `wait` で待つ。元のジョブは残り、再開したジョブがまた失敗したらそれをさらに `resume` できる。`conversation` が `null` なら再開できないので、票を `submit` し直す。
 
 ### サンドボックスの限界
 
