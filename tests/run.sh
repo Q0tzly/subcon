@@ -26,7 +26,7 @@ assert_rc() {
 
 # sub <args>: run subcon, leaving stdout in OUT and the exit code in RC.
 sub() { OUT="$("$SUBCON" "$@" 2>"$T/err")" && RC=0 || RC=$?; }
-jget() { jq -r "$1" <<<"$OUT"; }
+jget() { jq -r "$@" <<<"$OUT"; }
 
 # write_ticket <path> <file>...: a minimal ticket listing <file>s under ## Files.
 write_ticket() {
@@ -513,6 +513,15 @@ test_manage_apply() {
   assert_eq "$OUT" "{\"id\":\"$ID\",\"applied\":true}" stdout
   assert_eq "$(cat README.md)" "$(printf 'base\nfake change')" applied
   assert_eq "$(git diff --cached --name-only)" "" "index untouched"
+}
+
+test_manage_apply_from_subdir() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  mkdir -p sub && cd sub
+  sub apply "$ID"
+  assert_rc 0
+  assert_eq "$(cat ../README.md)" "$(printf 'base\nfake change')" applied
 }
 
 test_manage_apply_conflict() {
