@@ -123,7 +123,9 @@ cmd_stats() {
       "tokens": {
         "input": ($toks | map(.input // 0) | add // 0),
         "output": ($toks | map(.output // 0) | add // 0),
-        "total": ($toks | map(.total // 0) | add // 0)
+        "total": ($toks | map(.total // 0) | add // 0),
+        "cache_read": ($toks | map(.cache_read // 0) | add // 0),
+        "thinking": ($toks | map(.thinking // 0) | add // 0)
       },
       "by_model": (
         if $n_jobs == 0 then
@@ -158,7 +160,7 @@ cmd_stats() {
     "Applied:       \(.applied) (\(pct(.apply_rate)))",
     "Status:        done: \(.by_status.done), partial: \(.by_status.partial), blocked: \(.by_status.blocked), none: \(.by_status.none)",
     "Duration:      \(if .duration_s == null then "-" else "total \(.duration_s.total)s, median \(.duration_s.median)s" end)",
-    "Tokens:        input \(.tokens.input), output \(.tokens.output), total \(.tokens.total)",
+    "Tokens:        input \(.tokens.input), output \(.tokens.output), total \(.tokens.total), cache_read \(.tokens.cache_read), thinking \(.tokens.thinking)",
     "",
     "Model breakdown:",
     (

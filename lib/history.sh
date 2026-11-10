@@ -99,7 +99,9 @@ history_append_job() {
           {
             input: $agy.usage.input_tokens,
             output: $agy.usage.output_tokens,
-            total: $agy.usage.total_tokens
+            total: $agy.usage.total_tokens,
+            cache_read: $agy.usage.cache_read_tokens,
+            thinking: $agy.usage.thinking_tokens
           }
         else null
         end
