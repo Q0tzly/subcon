@@ -34,6 +34,12 @@ subcon trailer                     # コミット用の Co-Authored-By 行
 
 終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
 
+## Muse から使う
+
+`./install.sh` は、`muse` が入っていれば `skills/subcon` を `~/.config/muse/skills/subcon` にリンクする（リポジトリと同期。`muse skills list` で確認できる）。
+Muse は `~/.claude/CLAUDE.md` と `~/.codex/AGENTS.md` も個人ルールとして取り込むので、dotfiles を入れていれば指示も届く。dotfiles から入れるなら `install.sh --subcon`。
+スキルは `subcon guide` を読んでから委任する入口で、手順そのものは `docs/delegation.md` に一本化している。
+
 ## 開発
 
 ```sh

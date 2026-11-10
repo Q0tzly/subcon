@@ -1,5 +1,6 @@
 #!/bin/bash
-# Link subcon into PATH. Agents read the rules with `subcon guide`.
+# Link subcon into PATH, and its skill into Muse when muse is installed.
+# Agents read the rules with `subcon guide`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -17,3 +18,8 @@ link() {
 }
 
 link bin/subcon "$HOME/.local/bin/subcon"
+
+# Muse picks up skills from its config root; linking keeps the skill in sync with the repo.
+if command -v muse >/dev/null; then
+  link skills/subcon "${XDG_CONFIG_HOME:-$HOME/.config}/muse/skills/subcon"
+fi
