@@ -58,10 +58,18 @@ setup() {
   TOP="$(git rev-parse --show-toplevel)"
 }
 
-killtree() {
+pstree_of() {
   local p
-  for p in $(pgrep -P "$1" 2>/dev/null); do killtree "$p"; done
-  kill -9 "$1" 2>/dev/null || true
+  echo "$1"
+  for p in $(pgrep -P "$1" 2>/dev/null); do pstree_of "$p"; done
+}
+
+# Collect the whole tree first, then kill it at once: killing children one by
+# one lets a surviving parent react (write files) while the test cleans up.
+killtree() {
+  local pids
+  pids="$(pstree_of "$1")"
+  kill -9 $pids 2>/dev/null || true
 }
 
 teardown() {
@@ -70,7 +78,7 @@ teardown() {
   for p in "$SUBCON_STATE"/jobs/*/pid; do
     [[ -f "$p" ]] && killtree "$(cat "$p")"
   done
-  rm -rf "$T"
+  rm -rf "$T" 2>/dev/null || { sleep 0.5; rm -rf "$T"; }
 }
 
 jobdir() { echo "$SUBCON_STATE/jobs/$1"; }
