@@ -7,7 +7,12 @@ job_dir="${1:?job directory required}"
 
 cd "$job_dir/work"
 
+# Set for a resumed job: continue that agy conversation instead of starting a new one.
+resume_flags=()
+[[ -z "${SUBCON_CONVERSATION:-}" ]] || resume_flags=(--conversation "$SUBCON_CONVERSATION")
+
 agy -p "$(cat "$SUBCON_PROMPT_FILE")" \
+  ${resume_flags[@]+"${resume_flags[@]}"} \
   --model "$SUBCON_MODEL" \
   --mode accept-edits \
   --sandbox \

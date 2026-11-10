@@ -5,6 +5,7 @@ SUBCON_DEFAULT_TIMEOUT=30m
 SUBCON_COAUTHOR_EMAIL="${SUBCON_COAUTHOR_EMAIL:-noreply@google.com}"
 SUBCON_SCHEMA="$SUBCON_ROOT/schema/result.schema.json"
 SUBCON_PROMPT_PREAMBLE="$SUBCON_ROOT/lib/prompt.md"
+SUBCON_RESUME_PROMPT="$SUBCON_ROOT/lib/resume-prompt.md"
 
 # Headless agy auto-denies anything not allowed, which aborts the whole run,
 # so allow every command and deny the ones that change git state or reach out.

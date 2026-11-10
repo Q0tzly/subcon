@@ -18,6 +18,7 @@ usage: subcon new <feature>/<NN-name>
        subcon submit [--runner R] [--model M] [--timeout T] <ticket>...
        subcon wait [--timeout SEC] <id>...
        subcon run [--runner R] [--model M] [--timeout T] <ticket>
+       subcon resume [--timeout T] <id>
        subcon show <id>
        subcon list [--all]
        subcon diff <id>
@@ -42,6 +43,7 @@ case "$cmd" in
   submit) cmd_submit "$@" ;;
   wait) cmd_wait "$@" ;;
   run) cmd_run "$@" ;;
+  resume) cmd_resume "$@" ;;
   show) cmd_show "$@" ;;
   list) cmd_list "$@" ;;
   diff) cmd_diff "$@" ;;

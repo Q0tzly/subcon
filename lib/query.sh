@@ -47,7 +47,9 @@ job_result() {
         report: null,
         patch: null,
         diffstat: null,
-        error: null
+        error: null,
+        agy_error: null,
+        conversation: null
       }'
   else
     if [[ -f "$dir/result.json" ]]; then

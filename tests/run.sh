@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats (all when none given).
+# Groups: ticket submit query manage history stats resume (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -813,10 +813,104 @@ test_stats_real_jobs() {
   assert_eq "$(jget .tokens.total)" 240 tokens
 }
 
+# ---- resume (08) ---------------------------------------------------------
+
+# failed_job: a job that died mid-work with a conversation id.
+failed_job() {
+  FAKE_AGY_MODE=error submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+}
+
+test_resume_records_conversation() {
+  failed_job || return 1
+  assert_eq "$(result "$ID" .state)" failed state
+  assert_eq "$(result "$ID" .conversation)" conv-fake-1 conversation
+  assert_eq "$(result "$ID" .agy_error)" "fake network error" agy_error
+  [[ -s "$(jobdir "$ID")/patch.diff" ]] || fail "partial work not kept in patch.diff"
+}
+
+test_resume_finished_has_conversation() {
+  sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .conversation)" conv-fake-1 conversation
+  assert_eq "$(jget .agy_error)" null agy_error
+}
+
+test_resume_no_conversation_when_agy_silent() {
+  FAKE_AGY_MODE=error_noconv submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .conversation)" null conversation
+  assert_eq "$(result "$ID" .agy_error)" null agy_error
+}
+
+test_resume_ok() {
+  failed_job || return 1
+  local old=$ID log="$T/agy.log"
+  FAKE_AGY_LOG="$log" sub resume "$old"
+  assert_rc 0 || return 1
+  local new
+  new="$(jget '.[0].id')"
+  assert_match "$new" '.' new-id
+  [[ "$new" != "$old" ]] || fail "resume reused the id"
+  assert_eq "$(jget '.[0].error')" null error
+  wait_done "$new" || return 1
+  assert_eq "$(result "$new" .state)" finished state
+  assert_eq "$(result "$new" .status)" done status
+  assert_eq "$(jq -r .resume_of "$(jobdir "$new")/meta.json")" "$old" resume_of
+  assert_eq "$(jq -r .base "$(jobdir "$new")/meta.json")" "$(jq -r .base "$(jobdir "$old")/meta.json")" base
+  assert_eq "$(jq -r .ticket "$(jobdir "$new")/meta.json")" docs/t/01-a.md ticket
+  grep -q -- "--conversation conv-fake-1" "$log" || fail "no --conversation: $(cat "$log")"
+  grep -qi "interrupted" "$(jobdir "$new")/prompt.txt" || fail "no resume prompt"
+  # The old patch is carried over: the interrupted run's line plus the new one.
+  assert_eq "$(git apply --stat "$(jobdir "$new")/patch.diff" | tail -1 | grep -o '[0-9]* insertion')" "2 insertion" carried-patch
+  assert_eq "$(worktrees)" 1 worktrees
+  assert_eq "$(result "$old" .state)" failed old-state
+}
+
+test_resume_chain() {
+  failed_job || return 1
+  FAKE_AGY_MODE=error sub resume "$ID"
+  assert_rc 0 || return 1
+  local second
+  second="$(jget '.[0].id')"
+  wait_done "$second" || return 1
+  assert_eq "$(result "$second" .state)" failed state
+  sub resume "$second"
+  assert_rc 0 || return 1
+  wait_done "$(jget '.[0].id')" || return 1
+  assert_eq "$(result "$(jget '.[0].id')" .state)" finished state
+}
+
+test_resume_not_resumable() {
+  sub run docs/t/01-a.md
+  local done_id
+  done_id="$(jget .id)"
+  sub resume "$done_id"
+  assert_rc 1 || return 1
+  FAKE_AGY_MODE=error_noconv submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub resume "$ID"
+  assert_rc 1 || return 1
+  sub resume no-such-job
+  assert_rc 1 || return 1
+  sub resume
+  assert_rc 1 || return 1
+  assert_eq "$(jobcount)" 2 "no job created"
+}
+
+test_resume_history() {
+  failed_job || return 1
+  sub resume "$ID"
+  local new
+  new="$(jget '.[0].id')"
+  wait_done "$new" || return 1
+  assert_eq "$(jq -r --arg id "$new" 'select(.type == "job" and .id == $id) | .resume_of' "$SUBCON_STATE/history.jsonl")" "$ID" resume_of
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

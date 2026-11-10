@@ -19,6 +19,8 @@ subcon discard <id>
 
 stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは stderr。
 
+ジョブが `failed` で結果に `conversation` があれば、`subcon resume <id>` で途中の作業と agy の会話を引き継いで再開できる（新しい ID が返る。`wait` で待つ）。`conversation` が `null` なら票を出し直す。
+
 ## 既定は自分でやる
 
 次の 3 つを**全部**満たすときだけ Flash に渡す。1 つでも欠けたら自分で実装する。

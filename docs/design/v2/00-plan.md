@@ -11,7 +11,7 @@
 | 05 | `wait` `show` `run` とランナー消失の検出 | Flash | `lib/query.sh` |
 | 06 | `list` `diff` `apply` `discard` | Flash | `lib/manage.sh` |
 | 07 | `docs/delegation.md` と README を v2 に合わせる | 上位 | `docs/` `README.md` |
-| 08 | 中断からの再開 `subcon resume`（v2.1、設計は ../v2.md の「今後」） | 未定 | 未定 |
+| 08 | 中断からの再開 `subcon resume`（v2.1、設計は ../v2.md の「中断からの再開」） | 上位 | `lib/job.sh` `runners/local` `lib/resume-prompt.md` `tests/` |
 | 09 | 使用統計の土台（呼び出し口・空実装・合格テスト） | 上位 | `lib/job.sh` `lib/manage.sh` `bin/subcon` `tests/` |
 | 10 | 使用履歴の記録 | Flash | `lib/history.sh` |
 | 11 | `subcon stats` | Flash | `lib/stats.sh` |

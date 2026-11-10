@@ -6,6 +6,8 @@
 #   partial  change nothing, report partial
 #   fail     exit 3 without output
 #   sleep    wait FAKE_AGY_SLEEP seconds (default 3), then like ok
+#   error    change the file, then print an ERROR result with a conversation_id and exit 1
+#   error_noconv  exit 1 without any output
 # FAKE_AGY_LOG, when set, gets "PWD=<cwd>" and "FLAGS=<args except the prompt>".
 set -euo pipefail
 
@@ -31,8 +33,13 @@ fi
 first_file="$(awk '/^## /{ f = ($0 ~ /^## Files/); next }
   f && /^[-*][[:space:]]/ { sub(/^[-*][[:space:]]+/, ""); gsub(/`/, ""); print; exit }' <<<"$prompt")"
 
+# A resumed run gets no ticket (the real agy remembers it): continue on the file already changed.
+if [[ -z "$first_file" && " ${flags[*]:-} " == *" --conversation "* ]]; then
+  first_file="$(git status --porcelain | awk 'NR == 1 { print $2 }')"
+fi
+
 report() {
-  jq -cn --arg s "$1" '{status: "SUCCESS", duration_seconds: 1.5,
+  jq -cn --arg s "$1" '{status: "SUCCESS", conversation_id: "conv-fake-1", duration_seconds: 1.5,
     usage: {input_tokens: 100, output_tokens: 20, total_tokens: 120},
     structured_output: {status: $s, summary: "fake",
     files_changed: [], commands_run: [], design_questions: [], issues_found: []}}'
@@ -53,5 +60,10 @@ case "${FAKE_AGY_MODE:-ok}" in
   partial) report partial ;;
   fail) echo "fake-agy: failing" >&2; exit 3 ;;
   sleep) sleep "${FAKE_AGY_SLEEP:-3}"; change; report done ;;
+  error)
+    change
+    echo '{"status":"ERROR","conversation_id":"conv-fake-1","error":"fake network error"}'
+    exit 1 ;;
+  error_noconv) echo "fake-agy: failing" >&2; exit 1 ;;
   *) echo "fake-agy: unknown mode ${FAKE_AGY_MODE}" >&2; exit 64 ;;
 esac

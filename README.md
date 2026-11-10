@@ -30,7 +30,7 @@ subcon guide                       # ルール（docs/delegation.md）を表示
 subcon trailer                     # コミット用の Co-Authored-By 行
 ```
 
-ほかに `run`（submit + wait）、`show`、`list`。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
+ほかに `run`（submit + wait）、`show`、`list`、`resume`（失敗したジョブを agy の会話ごと再開）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
 
 終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
 
