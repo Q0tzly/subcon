@@ -2,15 +2,16 @@
 
 設計: [../v2.md](../v2.md)。番号順に進める。`担当` が Flash のものだけ `subcon` で委任する。
 
-| 票 | 内容 | 担当 | 依存 |
+| 票 | 内容 | 担当 | 触るファイル |
 | --- | --- | --- | --- |
-| 01 | テスト基盤（`tests/run.sh` `tests/fake-agy`）と各票の受け入れテスト | 上位 | - |
-| 02 | `bin/subcon` を振り分けだけにし、`lib/common.sh` `lib/prompt.md` を切り出す | 上位 | 01 |
-| 03 | `new` `guide`（`lib/ticket.sh` `templates/ticket.md`） | Flash | 02 |
-| 04 | ジョブ本体: `submit` `wait` `run` `show`（`lib/job.sh` `runners/local`） | Flash | 02 |
-| 05 | `list` `diff` `apply` `discard` | Flash | 04 |
-| 06 | `docs/delegation.md` と README を v2 に合わせる | 上位 | 03–05 |
+| 01 | テスト基盤と全票の受け入れテスト | 上位 | `tests/` |
+| 02 | 振り分けと共通部品。各 lib に関数の空実装を置く | 上位 | `bin/subcon` `lib/common.sh` `lib/prompt.md` 各 lib の雛形 |
+| 03 | `new` `guide` と票の検証 | Flash | `lib/ticket.sh` `templates/ticket.md` |
+| 04 | `submit` とバックグラウンド実行・後処理・local ランナー | Flash | `lib/job.sh` `runners/local` |
+| 05 | `wait` `show` `run` とランナー消失の検出 | Flash | `lib/query.sh` |
+| 06 | `list` `diff` `apply` `discard` | Flash | `lib/manage.sh` |
+| 07 | `docs/delegation.md` と README を v2 に合わせる | 上位 | `docs/` `README.md` |
 
-- 01・02 は合格条件と土台を決める作業なので上位がやる（委任の条件「作業票が書ける」を満たさない）
-- 03 と 04 は独立しているので並行に委任できる（v1 は同期実行なので、この時点では順番に）
-- 06 は判断を含む文章なので上位がやる
+- 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
+- 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
+- 07 は判断を含む文章なので上位がやる
