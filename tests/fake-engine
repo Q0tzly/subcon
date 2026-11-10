@@ -1,0 +1,84 @@
+#!/bin/bash
+# Stand-in for a container engine (docker/podman) in tests.
+# `run` is emulated by executing the entry command on the host: bind mounts
+# become path translations and -e values pointing into a mount are rewritten
+# to the host path. `rm` is a no-op. When FAKE_ENGINE_LOG is set, appends
+# MOUNT/ENV/RUN/RM lines describing the invocation. The entry command is
+# replaced by $FAKE_ENGINE_ENTRY (the repo's runners/container-entry.sh).
+set -uo pipefail
+
+log() {
+  if [[ -n "${FAKE_ENGINE_LOG:-}" ]]; then echo "$*" >> "$FAKE_ENGINE_LOG"; fi
+  return 0
+}
+
+cmd="${1:-}"
+if [[ $# -gt 0 ]]; then shift; fi
+case "$cmd" in
+  rm) log "RM $*"; exit 0 ;;
+  run) ;;
+  *) echo "fake-engine: unsupported command: $cmd" >&2; exit 1 ;;
+esac
+
+mounts_src=()
+mounts_dst=()
+envs=()
+workdir=""
+name=""
+image=""
+entry=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rm) ;;
+    --name) name="$2"; shift ;;
+    --workdir) workdir="$2"; shift ;;
+    --user) shift ;;
+    -v|--volume)
+      spec="$2"; shift
+      src="${spec%%:*}"
+      rest="${spec#*:}"
+      dst="${rest%%:*}"
+      mounts_src+=("$src")
+      mounts_dst+=("$dst")
+      log "MOUNT $src -> $dst"
+      ;;
+    -e|--env)
+      envs+=("$2")
+      log "ENV $2"
+      shift
+      ;;
+    -*) echo "fake-engine: unsupported flag: $1" >&2; exit 1 ;;
+    *)
+      if [[ -z "$image" ]]; then image="$1"; else entry="$1"; fi
+      ;;
+  esac
+  shift
+done
+log "RUN name=$name image=$image"
+
+translate() {
+  local p="$1" i
+  for ((i = 0; i < ${#mounts_dst[@]}; i++)); do
+    if [[ "$p" == "${mounts_dst[$i]}" ]]; then
+      printf '%s' "${mounts_src[$i]}"
+      return 0
+    fi
+    case "$p" in
+      "${mounts_dst[$i]}"/*) printf '%s/%s' "${mounts_src[$i]}" "${p#"${mounts_dst[$i]}"/}"; return 0 ;;
+    esac
+  done
+  printf '%s' "$p"
+}
+
+host_cwd="$(translate "$workdir")"
+for kv in ${envs[@]+"${envs[@]}"}; do
+  case "$kv" in
+    *=*) export "${kv%%=*}=$(translate "${kv#*=}")" ;;
+    *) : ;;
+  esac
+done
+
+[[ -n "$entry" ]] || { echo "fake-engine: no entry command" >&2; exit 1; }
+cd "$host_cwd" || { echo "fake-engine: cannot cd to $host_cwd" >&2; exit 1; }
+exec bash "${FAKE_ENGINE_ENTRY:-$entry}"

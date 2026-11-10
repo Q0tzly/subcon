@@ -49,5 +49,5 @@
 
 ## 前提の確認結果
 
-- agy は Linux で動く（この VM で稼働中）。イメージは Debian 系で足りる想定（要煙テスト）
+- agy は Linux で動く（この VM で稼働中）。公式インストーラは `curl -fsSL https://antigravity.google/cli/install.sh | bash` で、バイナリは `~/.local/bin/agy` に入る。要件は glibc 2.28 以上（Debian bookworm で可、musl の Alpine は不可）
 - 認証情報は `$HOME/.gemini/antigravity-cli/` 配下のファイル群なので、ディレクトリマウントで渡せる

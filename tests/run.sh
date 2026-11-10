@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats resume preflight authwarn (all when none given).
+# Groups: ticket submit query manage history stats resume preflight authwarn container (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,6 +10,7 @@ ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
 unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING
+unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
@@ -1054,10 +1055,83 @@ test_authwarn_consumer_resume() {
   grep -q "consumer" "$T/err" || fail "no consumer warning on resume: $(cat "$T/err")"
 }
 
+# ---- container (16) --------------------------------------------------------
+
+# engine_bin: a dir holding the fake engine as `docker`, to prepend to PATH.
+engine_bin() {
+  local d="$T/enginebin"
+  mkdir -p "$d"
+  ln -sf "$ROOT/tests/fake-engine" "$d/docker"
+  printf '%s' "$d"
+}
+
+test_container_run_ok() {
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    sub submit --runner container docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  assert_eq "$(jq -r .runner "$(jobdir "$ID")/meta.json")" container meta.runner
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .state)" finished state
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .checks.ok)" true checks.ok
+  assert_eq "$(result "$ID" -c .checks.files_changed)" '["README.md"]' files_changed
+  grep -q '^+fake change$' "$(jobdir "$ID")/patch.diff" || fail "patch lacks the change"
+  grep -q "MOUNT $(jobdir "$ID")/work -> /work" "$T/engine.log" || fail "no work mount: $(cat "$T/engine.log")"
+  grep -q "MOUNT $(jobdir "$ID") -> /job" "$T/engine.log" || fail "no job mount: $(cat "$T/engine.log")"
+  grep -q "ENV SUBCON_PROMPT_FILE=/job/prompt.txt" "$T/engine.log" || fail "no prompt env: $(cat "$T/engine.log")"
+  grep -q "ENV SUBCON_SCHEMA=/job/schema.json" "$T/engine.log" || fail "no schema env: $(cat "$T/engine.log")"
+  grep -q "RUN name=subcon-$ID " "$T/engine.log" || fail "no run line: $(cat "$T/engine.log")"
+  assert_eq "$(worktrees)" 1 worktrees
+  assert_eq "$(cat README.md)" base "user tree untouched"
+}
+
+test_container_engine_missing() {
+  SUBCON_CONTAINER_ENGINE=/nonexistent/engine sub run --runner container docs/t/01-a.md
+  assert_rc 4 || return 1
+  assert_eq "$(jget .state)" failed state
+  assert_match "$(jget .error)" 'runner exited with [1-9]' error
+}
+
+test_container_api_key_env() {
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    GEMINI_API_KEY=sk-test-secret sub run --runner container docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .state)" finished state
+  grep -qx "ENV GEMINI_API_KEY" "$T/engine.log" || fail "api key not passed by name: $(cat "$T/engine.log")"
+  ! grep -q "sk-test-secret" "$T/engine.log" || fail "api key value leaked into log"
+}
+
+test_container_no_api_key_env() {
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    sub run --runner container docs/t/01-a.md
+  assert_rc 0 || return 1
+  ! grep -q "GEMINI_API_KEY" "$T/engine.log" || fail "api key env passed while unset: $(cat "$T/engine.log")"
+}
+
+test_container_resume() {
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    FAKE_AGY_MODE=error FAKE_AGY_LOG="$T/agy.log" sub submit --runner container docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .state)" failed state
+  assert_eq "$(result "$ID" .conversation)" conv-fake-1 conversation
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    FAKE_AGY_LOG="$T/agy.log" sub resume "$ID"
+  assert_rc 0 || return 1
+  local new
+  new="$(jget '.[0].id')"
+  wait_done "$new" || return 1
+  assert_eq "$(result "$new" .state)" finished state
+  assert_eq "$(jq -r .runner "$(jobdir "$new")/meta.json")" container meta.runner
+  grep -q -- "--conversation conv-fake-1" "$T/agy.log" || fail "no --conversation: $(cat "$T/agy.log")"
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
