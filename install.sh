@@ -1,6 +1,5 @@
 #!/bin/bash
-# Link subcon into PATH and put the shared rules where agents' global
-# instructions expect them (~/.config/agents/delegation.md).
+# Link subcon into PATH. Agents read the rules with `subcon guide`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -18,4 +17,3 @@ link() {
 }
 
 link bin/subcon "$HOME/.local/bin/subcon"
-link docs/delegation.md "$HOME/.config/agents/delegation.md"

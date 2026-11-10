@@ -12,7 +12,7 @@ Claude / Codex などの上位エージェントが、作業票を書いた実�
 ```
 
 - `bin/subcon` → `~/.local/bin/subcon`
-- `docs/delegation.md` → `~/.config/agents/delegation.md`（各エージェントのグローバル指示からここを参照させる）
+- 各エージェントのグローバル指示から `subcon guide` を読ませる（ルールは docs/delegation.md）
 - 前提: `agy`（ログイン済み）と `jq`
 
 ## 使い方
