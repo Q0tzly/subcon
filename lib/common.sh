@@ -67,6 +67,33 @@ require_agy() {
   fi
 }
 
+container_engine() {
+  local bin
+  if [[ -n "${SUBCON_CONTAINER_ENGINE:-}" ]]; then
+    if bin="$(command -v "$SUBCON_CONTAINER_ENGINE" 2>/dev/null)" && [[ -n "$bin" ]]; then
+      echo "$bin"
+      return 0
+    fi
+    return 1
+  fi
+  if bin="$(command -v docker 2>/dev/null)" && [[ -n "$bin" ]]; then
+    echo "$bin"
+    return 0
+  fi
+  if bin="$(command -v podman 2>/dev/null)" && [[ -n "$bin" ]]; then
+    echo "$bin"
+    return 0
+  fi
+  return 1
+}
+
+require_container() {
+  local engine
+  engine="$(container_engine)" || die "container engine not found: install docker or podman"
+  local image="${SUBCON_CONTAINER_IMAGE:-subcon-runner:latest}"
+  "$engine" image inspect "$image" >/dev/null 2>&1 || die "container image not found: $image (build it from container/Containerfile)"
+}
+
 agy_auth_mode() {
   local settings="${HOME:-}/.gemini/antigravity-cli/settings.json"
   local provider=""

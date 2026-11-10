@@ -40,6 +40,10 @@ cmd_submit() {
   [[ -f "$SUBCON_ROOT/runners/$runner" && -x "$SUBCON_ROOT/runners/$runner" ]] || die "runner not found: $runner"
   [[ ${#tickets[@]} -gt 0 ]] || die "at least one ticket required"
 
+  if [[ "$runner" == "container" ]]; then
+    require_container
+  fi
+
   local repo
   repo="$(repo_top)"
 
@@ -223,6 +227,10 @@ cmd_resume() {
   runner="$(jq -r .runner "$dir/meta.json")"
   model="$(jq -r .model "$dir/meta.json")"
   [[ -n "$timeout" ]] || timeout="$(jq -r .timeout "$dir/meta.json")"
+
+  if [[ "$runner" == "container" ]]; then
+    require_container
+  fi
 
   local result rc=0
   if job_create "$repo" "$ticket" "$base" "$runner" "$model" "$timeout" "$dir"; then
