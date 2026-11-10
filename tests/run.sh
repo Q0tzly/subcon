@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats resume preflight (all when none given).
+# Groups: ticket submit query manage history stats resume preflight authwarn (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,7 +9,7 @@ FAKEBIN="$(mktemp -d)"
 ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
-unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG
+unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
@@ -100,6 +100,18 @@ preflight_home() {
   if [[ "$1" == with-agy ]]; then
     mkdir -p "$h/.local/bin"
     ln -s "$ROOT/tests/fake-agy" "$h/.local/bin/agy"
+  fi
+  printf '%s' "$h"
+}
+
+# auth_home <consumer|api-key>: a throwaway HOME whose agy settings mark the
+# auth mode: api-key writes {"modelProvider":"gemini"}; consumer writes none.
+auth_home() {
+  local h="$T/home-auth-$1"
+  mkdir -p "$h"
+  if [[ "$1" == api-key ]]; then
+    mkdir -p "$h/.gemini/antigravity-cli"
+    echo '{"modelProvider":"gemini"}' > "$h/.gemini/antigravity-cli/settings.json"
   fi
   printf '%s' "$h"
 }
@@ -994,10 +1006,58 @@ test_preflight_fallback_run() {
   assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
 }
 
+# ---- authwarn (15) ---------------------------------------------------------
+
+test_authwarn_consumer_submit() {
+  local h
+  h="$(auth_home consumer)"
+  HOME="$h" sub submit docs/t/01-a.md
+  assert_rc 0 || return 1
+  grep -q "consumer" "$T/err" || fail "no consumer warning: $(cat "$T/err")"
+  grep -q "API key" "$T/err" || fail "warning does not mention API key: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 1 jobs
+}
+
+test_authwarn_api_key_run() {
+  local h
+  h="$(auth_home api-key)"
+  HOME="$h" sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .state)" finished state
+  ! grep -q "consumer" "$T/err" || fail "warned in api-key mode: $(cat "$T/err")"
+}
+
+test_authwarn_silenced() {
+  local h
+  h="$(auth_home consumer)"
+  HOME="$h" SUBCON_NO_AUTH_WARNING=1 sub submit docs/t/01-a.md
+  assert_rc 0 || return 1
+  ! grep -q "consumer" "$T/err" || fail "warning not silenced: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 1 jobs
+}
+
+test_authwarn_guide_quiet() {
+  local h
+  h="$(auth_home consumer)"
+  HOME="$h" sub guide
+  assert_rc 0 || return 1
+  ! grep -q "consumer" "$T/err" || fail "guide warned: $(cat "$T/err")"
+}
+
+test_authwarn_consumer_resume() {
+  local h
+  h="$(auth_home consumer)"
+  HOME="$h" FAKE_AGY_MODE=error submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  HOME="$h" sub resume "$ID"
+  assert_rc 0 || return 1
+  grep -q "consumer" "$T/err" || fail "no consumer warning on resume: $(cat "$T/err")"
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

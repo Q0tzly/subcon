@@ -105,6 +105,13 @@ stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは 
 ネットワークエラーなどで落ちたときは、`subcon resume <id>` で続きから再開できる（v2.1 で実装済み）。
 対象は `state: failed` で結果の `conversation` が `null` でないジョブ。再開は新しいジョブとして発行されるので、新しい ID を `wait` で待つ。元のジョブは残り、再開したジョブがまた失敗したらそれをさらに `resume` できる。`conversation` が `null` なら再開できないので、票を `submit` し直す。
 
+### agy の認証方式
+
+agy の認証が消費者向け Google ログイン（AI Pro など）の場合、`submit` / `resume` は警告を出してから実行する。
+消費者プランのログインをサードパーティ製エージェントから使うことは Antigravity の規約で認められておらず、アカウント停止の対象になりうるため。
+サポートされる形は、agy を API キー方式に切り替える（`~/.gemini/antigravity-cli/settings.json` の `modelProvider` を `gemini` にして `GEMINI_API_KEY` を設定）か、自分自身のスクリプト／CI から使うこと。
+警告は `SUBCON_NO_AUTH_WARNING=1` で消せる（自分の CI 等、使い方を把握している場合用）。
+
 ### サンドボックスの限界
 
 agy はヘッドレスでは許可されていないコマンドを自動拒否し、その時点で実行全体が止まる。
