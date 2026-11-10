@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+if ! command -v agy >/dev/null 2>&1 && [[ -n "${HOME:-}" && -x "$HOME/.local/bin/agy" ]]; then
+  export PATH="$HOME/.local/bin${PATH:+:$PATH}"
+fi
+
 job_dir="${1:?job directory required}"
 [[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
 [[ -d "$job_dir" ]] || { echo "runners/local: job directory not found: $job_dir" >&2; exit 1; }

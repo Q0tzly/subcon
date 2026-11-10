@@ -1,6 +1,7 @@
 # Job creation, background execution and finalization (ticket 04).
 
 cmd_submit() {
+  require_agy
   local runner="local"
   local model
   model="$(default_model)"
@@ -183,6 +184,7 @@ job_create() {
 }
 
 cmd_resume() {
+  require_agy
   local timeout="" id=""
   while [[ $# -gt 0 ]]; do
     case "$1" in

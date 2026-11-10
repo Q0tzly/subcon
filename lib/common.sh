@@ -46,12 +46,36 @@ repo_top() { git rev-parse --show-toplevel 2>/dev/null || die "not inside a git 
 
 default_model() { echo "${SUBCON_MODEL:-$SUBCON_DEFAULT_MODEL}"; }
 
+agy_bin() {
+  local bin
+  if bin="$(command -v agy 2>/dev/null)" && [[ -n "$bin" ]]; then
+    echo "$bin"
+    return 0
+  fi
+  if [[ -n "${HOME:-}" && -x "$HOME/.local/bin/agy" ]]; then
+    echo "$HOME/.local/bin/agy"
+    return 0
+  fi
+  return 1
+}
+
+require_agy() {
+  local bin
+  bin="$(agy_bin)" || die "agy not found: install agy and make sure it is on PATH or at ~/.local/bin/agy"
+  if ! command -v agy >/dev/null 2>&1; then
+    export PATH="$HOME/.local/bin${PATH:+:$PATH}"
+  fi
+}
+
 # "Gemini 3.8 Flash (Medium)" -> "Gemini 3.8 Flash"
 model_name() {
-  agy models 2>/dev/null | awk -F'\t' -v id="$1" '$1 == id { sub(/ \([^)]*\)$/, "", $2); print $2 }'
+  local bin
+  bin="$(agy_bin)" || return 1
+  "$bin" models 2>/dev/null | awk -F'\t' -v id="$1" '$1 == id { sub(/ \([^)]*\)$/, "", $2); print $2 }'
 }
 
 cmd_trailer() {
+  require_agy
   local model
   model="$(default_model)"
   if [[ "${1:-}" == "--model" ]]; then
