@@ -55,6 +55,6 @@ Claude の利用上限が厳しいため、フル版はやらない。2 つに�
 
 ## 事前に要るもの
 
-- 履歴の `tokens` に `cache_read` と `thinking` を足す（agy の `usage` には `cache_read_tokens` と `thinking_tokens` があるが、今は捨てている）。コストの計算に要る。票 13（`docs/design/v2/13-tokens.md`）で実施する
+- 履歴の `tokens` に `cache_read` と `thinking` を足す（agy の `usage` には `cache_read_tokens` と `thinking_tokens` があるが、今は捨てている）。コストの計算に要る。票 13（`docs/design/v2/13-tokens.md`）で実施済み
 - 土台コミットから票を流し直すための手順（worktree を土台に作って `subcon submit` する。作業票はそのコミットに含まれている必要がある）
 - 監督役のトークンを記録する場所（今はサブエージェントの報告に頼っている）
