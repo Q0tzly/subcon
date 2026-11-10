@@ -693,8 +693,14 @@ test_history_parallel() {
 
 # hjob <id> <repo> <model> <state> <status|null> <checks_ok|null> <duration|null> <tin|null> <tout|null> [days-ago]
 hjob() {
-  local created
-  created="$(date -u -r $(( $(date +%s) - ${10:-0} * 86400 )) +%Y-%m-%dT%H:%M:%SZ)"
+  local created epoch
+  epoch=$(( $(date +%s) - ${10:-0} * 86400 ))
+  # BSD date formats an epoch with -r, GNU date with -d @<epoch>.
+  if date -d @0 +%s >/dev/null 2>&1; then
+    created="$(date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ)"
+  else
+    created="$(date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ)"
+  fi
   jq -cn --arg id "$1" --arg repo "$2" --arg model "$3" --arg state "$4" --arg created "$created" \
     --argjson status "$( [[ $5 == null ]] && echo null || echo "\"$5\"")" \
     --argjson ok "$6" --argjson dur "$7" --argjson tin "$8" --argjson tout "$9" '
