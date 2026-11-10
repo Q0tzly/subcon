@@ -1,7 +1,23 @@
 # Flash への実装委任
 
 上位エージェント（Claude / Codex など）が、実装の一部を agy 経由の Gemini Flash に渡すときのルール。
-全エージェント共通。各エージェントのグローバル指示からこのファイルを読み込む。
+全エージェント共通。`subcon guide` で表示できる。
+
+## 最短手順
+
+```sh
+subcon new myfeat/01-parser                     # 票の雛形。書いたらコミットする（ジョブは HEAD から始まる）
+git add docs/design/myfeat && git commit -m "add: ticket for parser"
+subcon submit docs/design/myfeat/01-*.md docs/design/myfeat/02-*.md   # 独立した票は並行に
+subcon wait --timeout 540 <id> <id>             # 終了コード 5 なら繰り返す
+subcon diff <id>                                # 全部読む
+subcon apply <id>                               # 作業ツリーに当てる（コミットはしない）
+<Acceptance のコマンドを自分で実行>
+git commit                                      # trailer は下記。`subcon trailer` が実装者の行を出す
+subcon discard <id>
+```
+
+stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは stderr。
 
 ## 既定は自分でやる
 
@@ -18,7 +34,7 @@
 
 1. **設計 doc** を書く（置き場は下記）。別モデルにレビューさせる（Claude が書いたら Codex、など）
 2. **詳細設計**として作業票を並べる。レビューはインターフェースと合格条件だけ見せれば足りる
-3. 作業票 1 枚ずつ `subcon run <票>` で Flash に渡す
+3. 作業票をコミットして `subcon submit` で Flash に渡す。依存の無い票は並行に出してよい
 4. **検収**（下記）。通ったら上位がコミットする
 5. 食い違いや Flash の指摘が出たら、**コードより先に設計 doc を直す**。直した票で再委任するか、自分で直す
 
@@ -47,22 +63,31 @@
 前提・既存コードの参照先・やってはいけないこと。
 ```
 
-- 合格条件は**上位が決める**。Flash が書くテストは自分の実装に合わせがちなので、追加分として扱う
+- 合格条件は**上位が決める**。テストは票より先に上位が書いてコミットしておく。Flash が書くテストは自分の実装に合わせがちなので、追加分として扱う
+- 上位のテストにもバグはある。Flash が「テストが間違っている」と blocked で返してきたら、確かめて上位が直す（Flash にはテストを触らせない）
+- テストは agy のサンドボックス内でも動くようにする（例: git を使うなら `GIT_CONFIG_GLOBAL=/dev/null`）。動かないと Flash はサンドボックス外で実行する
+- 実行環境の制約を `## Notes` に書く（例: macOS の bash 3.2 で動くこと）
 - `Files` に無いファイルを変更したら差し戻し
 - 曖昧さを残さない。Flash は穴を推測で埋める
 
 ## 委任の実行
 
-```sh
-subcon run docs/design/foo/01-bar.md        # 既定は gemini-3.8-flash-medium
-subcon run --model gemini-3.8-flash-high …  # 難しめの票
-```
+- ジョブは発行時の `HEAD` から専用の worktree で動き、上位の作業ツリーには触らない。待っている間も上位は作業を続けられる
+- 既定のモデルは `gemini-3.8-flash-medium`。量が多い・難しめの票は `--model gemini-3.8-flash-high`
+- `subcon list` でこのリポジトリのジョブ一覧、`subcon show <id>` で 1 件
 
-- 作業ツリーがクリーンな状態で実行する（Flash の変更だけが diff に出るように）
-- 終了コード: `0` done / `2` Flash が partial・blocked を申告 / `3` コミットした・`## Files` 外を変更した
-- 結果 JSON の生出力は `.git/subcon/` に残る
-- `3` のときは diff を捨てて（`git restore` / 範囲外ファイル削除。コミットされていたら `git reset` は確認を取ってから）票を直す
-- 依存の取得などで外部ネットワークが要る票は `--no-sandbox`。ただし下記の通りサンドボックスは完全ではない
+| 終了コード | 意味 | 次にやること |
+| --- | --- | --- |
+| 0 | done、チェックも OK | 検収 |
+| 2 | Flash が partial / blocked を申告 | `report.summary` と `design_questions` を読む。原因が票やテストなら上位が直して再発行 |
+| 3 | コミットした・`## Files` 外を変更した | `checks` を見る。パッチを捨てて票を直す |
+| 4 | ジョブが失敗（agy のエラー・タイムアウト・ランナー消失） | `error` と `log` を見る。下記の再開を検討 |
+| 5 | `wait` のタイムアウト | もう一度 `wait` |
+
+### 中断したジョブの再開
+
+ネットワークエラーなどで落ちたときは、agy の会話が残っていれば続きから再開できる（`subcon resume` は v2.1 で実装予定）。
+今は手で: ジョブの `agy.json` の `conversation_id` を控え、新しいジョブの worktree で `agy --conversation <ID> -p "中断された。作業ツリーを確認して続けろ"` を実行する。
 
 ### サンドボックスの限界
 
@@ -75,9 +100,10 @@ agy にはサンドボックス外実行（`BypassSandbox`）を CLI から禁�
 
 自己申告を信じない。
 
-- `git diff` を全部読む
+- `subcon diff <id>` を全部読む。Flash の申告ではなく `checks.files_changed` を見る
 - `Acceptance` のコマンドを**自分で**実行する
 - Flash の `design_questions` / `issues_found` を読み、設計に反映すべきか判断する
+- テストが通っても、テストの無い性質（シグナル・競合・後片付けなど）は読んで確かめる
 
 ## 打ち切り
 

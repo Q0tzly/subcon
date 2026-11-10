@@ -17,14 +17,33 @@ Claude / Codex などの上位エージェントが、作業票を書いた実�
 
 ## 使い方
 
+票（作業票）をジョブとして発行し、結果のパッチを検収して当てる。GitHub Actions のように、発行したら上位は他の作業を続けられる。
+
 ```sh
-subcon run docs/design/foo/01-bar.md   # 作業票 1 枚を Flash に渡す
-subcon trailer                         # コミット用の Co-Authored-By 行
+subcon new feat/01-parser          # 票の雛形を作る
+subcon submit <ticket>...          # ジョブを発行（ID が返る）
+subcon wait --timeout 540 <id>...  # 結果 JSON を待つ
+subcon diff <id>                   # パッチを読む
+subcon apply <id>                  # 作業ツリーに当てる
+subcon discard <id>                # ジョブを消す
+subcon guide                       # ルール（docs/delegation.md）を表示
+subcon trailer                     # コミット用の Co-Authored-By 行
 ```
 
-終了コード: `0` done / `2` Flash が partial・blocked を申告 / `3` コミットした・`## Files` 外を変更した。
+ほかに `run`（submit + wait）、`show`、`list`。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
+
+終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
+
+## 開発
+
+```sh
+tests/run.sh            # 全テスト（本物の agy は使わない）
+tests/run.sh submit     # グループ指定: ticket submit query manage
+```
+
+設計は [docs/design/v2.md](docs/design/v2.md)、作業票は [docs/design/v2/](docs/design/v2/)。
 
 ## 現状の制約
 
-agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。
-隔離した実行環境（コンテナ / Mac mini）でパッチだけ持ち帰る形に移す予定。
+- agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。隔離した実行環境（コンテナ / Mac mini）のランナーを予定
+- 中断したジョブの再開（`subcon resume`）は v2.1 で予定
