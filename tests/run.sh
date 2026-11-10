@@ -10,6 +10,8 @@ ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
 unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG
+# Keep tests independent of the user's git config (and readable inside agy's sandbox).
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 # ---- helpers -------------------------------------------------------------
 
