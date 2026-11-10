@@ -20,3 +20,4 @@
 ## Notes
 - `state` の判定は `lib/query.sh` の `job_result` を通す（ランナー消失の検出を共有するため）。
 - `lib/job.sh`、`lib/query.sh`、`bin/subcon`、`lib/common.sh`、`tests/` は編集しない。
+- macOS の `/bin/bash` 3.2 で動くこと（連想配列・`mapfile`・`${x,,}` は使わない。`set -u` 下で空配列を `"${a[@]}"` と展開しない）。

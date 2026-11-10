@@ -31,3 +31,4 @@
 ## Notes
 - JSON の出力は `lib/common.sh` の `json_out`、エラーは `die`（終了コード 1）を使う。
 - `bin/subcon`、`lib/common.sh`、`tests/` は編集しない。
+- macOS の `/bin/bash` 3.2 で動くこと（連想配列・`mapfile`・`${x,,}` は使わない。`set -u` 下で空配列を `"${a[@]}"` と展開しない）。

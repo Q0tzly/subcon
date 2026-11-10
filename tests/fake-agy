@@ -1,0 +1,55 @@
+#!/bin/bash
+# Stand-in for agy in tests (linked as `agy` on PATH). Behaviour comes from FAKE_AGY_MODE:
+#   ok       append "fake change" to the ticket's first ## Files entry, report done
+#   outside  like ok, plus create outside.txt
+#   commit   like ok, then commit
+#   partial  change nothing, report partial
+#   fail     exit 3 without output
+#   sleep    wait FAKE_AGY_SLEEP seconds (default 3), then like ok
+# FAKE_AGY_LOG, when set, gets "PWD=<cwd>" and "FLAGS=<args except the prompt>".
+set -euo pipefail
+
+if [[ "${1:-}" == models ]]; then
+  printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n'
+  printf 'gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n'
+  exit 0
+fi
+
+prompt="" flags=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--print|--prompt) prompt="$2"; shift ;;
+    *) flags+=("$1") ;;
+  esac
+  shift
+done
+if [[ -n "${FAKE_AGY_LOG:-}" ]]; then
+  { echo "PWD=$PWD"; echo "FLAGS=${flags[*]:-}"; } >> "$FAKE_AGY_LOG"
+fi
+[[ -n "$prompt" ]] || { echo "fake-agy: no prompt" >&2; exit 64; }
+
+first_file="$(awk '/^## /{ f = ($0 ~ /^## Files/); next }
+  f && /^[-*][[:space:]]/ { sub(/^[-*][[:space:]]+/, ""); gsub(/`/, ""); print; exit }' <<<"$prompt")"
+
+report() {
+  jq -cn --arg s "$1" '{status: "SUCCESS", structured_output: {status: $s, summary: "fake",
+    files_changed: [], commands_run: [], design_questions: [], issues_found: []}}'
+}
+change() {
+  mkdir -p "$(dirname "$first_file")"
+  echo "fake change" >> "$first_file"
+}
+
+case "${FAKE_AGY_MODE:-ok}" in
+  ok) change; report done ;;
+  outside) change; echo x > outside.txt; report done ;;
+  commit)
+    change
+    git add -A
+    git -c user.name=fake -c user.email=fake@example.invalid commit -qm fake
+    report done ;;
+  partial) report partial ;;
+  fail) echo "fake-agy: failing" >&2; exit 3 ;;
+  sleep) sleep "${FAKE_AGY_SLEEP:-3}"; change; report done ;;
+  *) echo "fake-agy: unknown mode ${FAKE_AGY_MODE}" >&2; exit 64 ;;
+esac

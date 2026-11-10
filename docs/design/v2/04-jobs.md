@@ -32,3 +32,4 @@
 - 上位の作業ツリーと index は一切変更しない。変更は `<job-dir>/work` の中だけ。
 - worktree はジョブのリポジトリに対して `git -C <repo> worktree add --detach <job-dir>/work <base>`。
 - `bin/subcon`、`lib/common.sh`、`lib/ticket.sh`、`tests/` は編集しない。
+- macOS の `/bin/bash` 3.2 で動くこと（連想配列・`mapfile`・`${x,,}` は使わない。`set -u` 下で空配列を `"${a[@]}"` と展開しない）。
