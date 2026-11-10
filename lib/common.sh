@@ -67,6 +67,27 @@ require_agy() {
   fi
 }
 
+agy_auth_mode() {
+  local settings="${HOME:-}/.gemini/antigravity-cli/settings.json"
+  local provider=""
+  if [[ -n "${HOME:-}" && -f "$settings" ]]; then
+    provider="$(jq -r '.modelProvider // empty' "$settings" 2>/dev/null)" || provider=""
+  fi
+  if [[ "$provider" == "gemini" ]]; then
+    echo "api-key"
+  else
+    echo "consumer"
+  fi
+  return 0
+}
+
+warn_consumer_auth() {
+  if [[ "$(agy_auth_mode)" == "consumer" && -z "${SUBCON_NO_AUTH_WARNING:-}" ]]; then
+    echo 'subcon: warning: agy is using a consumer Google login. Driving agy from a third-party agent on a consumer plan (AI Pro etc.) violates Antigravity'\''s terms and risks account suspension. Supported options: switch agy to an API key (set "modelProvider": "gemini" in ~/.gemini/antigravity-cli/settings.json and export GEMINI_API_KEY), or run subcon from your own scripts/CI. Silence with SUBCON_NO_AUTH_WARNING=1.' >&2
+  fi
+  return 0
+}
+
 # "Gemini 3.8 Flash (Medium)" -> "Gemini 3.8 Flash"
 model_name() {
   local bin

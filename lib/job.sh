@@ -2,6 +2,7 @@
 
 cmd_submit() {
   require_agy
+  warn_consumer_auth
   local runner="local"
   local model
   model="$(default_model)"
@@ -185,6 +186,7 @@ job_create() {
 
 cmd_resume() {
   require_agy
+  warn_consumer_auth
   local timeout="" id=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
