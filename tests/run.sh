@@ -609,7 +609,7 @@ test_history_job_line() {
   assert_eq "$(jq -r .insertions <<<"$l")" 1 insertions
   assert_eq "$(jq -r .deletions <<<"$l")" 0 deletions
   assert_eq "$(jq -r .duration_s <<<"$l")" 1.5 duration_s
-  assert_eq "$(jq -c .tokens <<<"$l")" '{"input":100,"output":20,"total":120}' tokens
+  assert_eq "$(jq -c .tokens <<<"$l")" '{"input":100,"output":20,"total":120,"cache_read":30,"thinking":10}' tokens
   assert_eq "$(jq -r .resume_of <<<"$l")" null resume_of
 }
 
@@ -707,7 +707,7 @@ hjob() {
     {type: "job", id: $id, repo: $repo, ticket: "docs/t/x.md", model: $model, runner: "local",
      created_at: $created, finished_at: $created, duration_s: $dur, state: $state, status: $status,
      checks_ok: $ok, files_changed: 1, insertions: 1, deletions: 0,
-     tokens: (if $tin == null then null else {input: $tin, output: $tout, total: ($tin + $tout)} end),
+     tokens: (if $tin == null then null else {input: $tin, output: $tout, total: ($tin + $tout), cache_read: 5, thinking: 2} end),
      resume_of: null}' >> "$(hist)"
 }
 hevent() { jq -cn --arg id "$1" '{type: "event", id: $id, event: "applied", at: "2026-01-01T00:00:00Z"}' >> "$(hist)"; }
@@ -748,7 +748,7 @@ test_stats_counts() {
   assert_eq "$(jget .applied)" 2 applied
   assert_eq "$(jget .apply_rate)" 0.5 apply_rate
   assert_eq "$(jget -c .duration_s)" '{"total":60,"median":20}' duration
-  assert_eq "$(jget -c .tokens)" '{"input":128,"output":32,"total":160}' tokens
+  assert_eq "$(jget -c .tokens)" '{"input":128,"output":32,"total":160,"cache_read":15,"thinking":6}' tokens
   assert_eq "$(jget -c .by_model.m1)" '{"jobs":2,"success":1,"applied":1,"tokens_total":150}' m1
   assert_eq "$(jget -c .by_model.m2)" '{"jobs":2,"success":0,"applied":1,"tokens_total":10}' m2
 }
@@ -801,6 +801,7 @@ test_stats_text() {
   sub stats --text
   assert_rc 0 || return 1
   grep -q '^Jobs:' <<<"$OUT" || fail "no Jobs: line"
+  grep -q 'cache_read 15, thinking 6' <<<"$OUT" || fail "no cache_read/thinking in Tokens line"
   grep -q 'm1' <<<"$OUT" || fail "no model row"
   ! jq -e . >/dev/null 2>&1 <<<"$OUT" || fail "--text printed JSON"
 }
@@ -817,6 +818,8 @@ test_stats_real_jobs() {
   assert_eq "$(jget .success)" 1 success
   assert_eq "$(jget .applied)" 1 applied
   assert_eq "$(jget .tokens.total)" 240 tokens
+  assert_eq "$(jget .tokens.cache_read)" 60 tokens.cache_read
+  assert_eq "$(jget .tokens.thinking)" 20 tokens.thinking
 }
 
 # ---- resume (08) ---------------------------------------------------------

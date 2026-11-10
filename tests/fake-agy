@@ -53,7 +53,7 @@ emit() {
 
 report() {
   emit "$(jq -cn --arg s "$1" '{status: "SUCCESS", conversation_id: "conv-fake-1", duration_seconds: 1.5,
-    usage: {input_tokens: 100, output_tokens: 20, total_tokens: 120},
+    usage: {input_tokens: 100, output_tokens: 20, total_tokens: 120, cache_read_tokens: 30, thinking_tokens: 10},
     structured_output: {status: $s, summary: "fake",
     files_changed: [], commands_run: [], design_questions: [], issues_found: []}}')"
 }
