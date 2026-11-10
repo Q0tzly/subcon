@@ -52,4 +52,3 @@ tests/run.sh submit     # グループ指定: ticket submit query manage
 ## 現状の制約
 
 - agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。隔離した実行環境（コンテナ / Mac mini）のランナーを予定
-- 中断したジョブの再開（`subcon resume`）は v2.1 で予定
