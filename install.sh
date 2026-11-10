@@ -1,5 +1,5 @@
 #!/bin/bash
-# Link subcon into PATH, and its skill into Muse when muse is installed.
+# Link subcon into PATH, and its skill into Muse when Muse is present.
 # Agents read the rules with `subcon guide`.
 set -euo pipefail
 
@@ -19,7 +19,12 @@ link() {
 
 link bin/subcon "$HOME/.local/bin/subcon"
 
-# Muse picks up skills from its config root; linking keeps the skill in sync with the repo.
-if command -v muse >/dev/null; then
+# The VM-hosted Muse reads skills from ~/workspace/custom-skills and ships
+# no `muse` command, so detect it by its runtime or its skills directory.
+# A muse CLI install, when one exists, uses the XDG config root instead.
+# Linking keeps the skill in sync with the repo.
+if command -v hatch >/dev/null || [ -d "$HOME/workspace/custom-skills" ]; then
+  link skills/subcon "$HOME/workspace/custom-skills/subcon"
+elif command -v muse >/dev/null; then
   link skills/subcon "${XDG_CONFIG_HOME:-$HOME/.config}/muse/skills/subcon"
 fi

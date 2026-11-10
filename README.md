@@ -36,8 +36,8 @@ subcon trailer                     # コミット用の Co-Authored-By 行
 
 ## Muse から使う
 
-`./install.sh` は、`muse` が入っていれば `skills/subcon` を `~/.config/muse/skills/subcon` にリンクする（リポジトリと同期。`muse skills list` で確認できる）。
-Muse は `~/.claude/CLAUDE.md` と `~/.codex/AGENTS.md` も個人ルールとして取り込むので、dotfiles を入れていれば指示も届く。dotfiles から入れるなら `install.sh --subcon`。
+`./install.sh` は、Muse があれば `skills/subcon` をそのスキル置き場にリンクする（リポジトリと同期）。VM版 Muse では `~/workspace/custom-skills/subcon`、CLI版では `~/.config/muse/skills/subcon`。
+dotfiles を入れていれば、`ai/AGENTS.md` が `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`、Muse の `~/AGENTS.md` にリンクされるので指示も届く。dotfiles から入れるなら `install.sh --subcon`。
 スキルは `subcon guide` を読んでから委任する入口で、手順そのものは `docs/delegation.md` に一本化している。
 
 ## 開発
