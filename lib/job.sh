@@ -339,6 +339,10 @@ job_finalize() {
       error: (if $error == "" then null else $error end)
     }' | atomic_write "$job_dir/result.json"
 
+  # Before the state update, so a finished state implies the history line exists.
+  # In a subshell: history must never break finalization.
+  ( history_append_job "$job_dir" ) || echo "subcon: failed to record history for $id" >&2
+
   # 3. Update state
   echo "$final_state" | atomic_write "$job_dir/state"
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage (all when none given).
+# Groups: ticket submit query manage history stats (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -580,10 +580,234 @@ test_manage_discard_running() {
   assert_eq "$(worktrees)" 1 worktrees
 }
 
+# ---- history (10) --------------------------------------------------------
+
+hist() { echo "$SUBCON_STATE/history.jsonl"; }
+hline() { sed -n "${1}p" "$(hist)"; }
+
+test_history_job_line() {
+  sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  local id
+  id="$(jget .id)"
+  [[ -f "$(hist)" ]] || fail "no history.jsonl"
+  assert_eq "$(wc -l < "$(hist)" | tr -d ' ')" 1 lines
+  local l
+  l="$(hline 1)"
+  assert_eq "$(jq -r .type <<<"$l")" job type
+  assert_eq "$(jq -r .id <<<"$l")" "$id" id
+  assert_eq "$(jq -r .repo <<<"$l")" "$TOP" repo
+  assert_eq "$(jq -r .ticket <<<"$l")" docs/t/01-a.md ticket
+  assert_eq "$(jq -r .model <<<"$l")" gemini-3.8-flash-medium model
+  assert_eq "$(jq -r .runner <<<"$l")" local runner
+  assert_eq "$(jq -r .created_at <<<"$l")" "$(jq -r .created_at "$(jobdir "$id")/meta.json")" created_at
+  assert_match "$(jq -r .finished_at <<<"$l")" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' finished_at
+  assert_eq "$(jq -r .state <<<"$l")" finished state
+  assert_eq "$(jq -r .status <<<"$l")" done status
+  assert_eq "$(jq -r .checks_ok <<<"$l")" true checks_ok
+  assert_eq "$(jq -r .files_changed <<<"$l")" 1 files_changed
+  assert_eq "$(jq -r .insertions <<<"$l")" 1 insertions
+  assert_eq "$(jq -r .deletions <<<"$l")" 0 deletions
+  assert_eq "$(jq -r .duration_s <<<"$l")" 1.5 duration_s
+  assert_eq "$(jq -c .tokens <<<"$l")" '{"input":100,"output":20,"total":120}' tokens
+  assert_eq "$(jq -r .resume_of <<<"$l")" null resume_of
+}
+
+test_history_failed_job() {
+  FAKE_AGY_MODE=fail sub run docs/t/01-a.md
+  assert_rc 4 || return 1
+  local l
+  l="$(hline 1)"
+  assert_eq "$(jq -r .state <<<"$l")" failed state
+  assert_eq "$(jq -r .status <<<"$l")" null status
+  assert_eq "$(jq -r .duration_s <<<"$l")" null duration_s
+  assert_eq "$(jq -r .tokens <<<"$l")" null tokens
+}
+
+test_history_partial_no_patch_counts() {
+  FAKE_AGY_MODE=partial sub run docs/t/01-a.md
+  assert_rc 2 || return 1
+  local l
+  l="$(hline 1)"
+  assert_eq "$(jq -r .files_changed <<<"$l")" 0 files_changed
+  assert_eq "$(jq -r .insertions <<<"$l")" 0 insertions
+  assert_eq "$(jq -r .deletions <<<"$l")" 0 deletions
+}
+
+test_history_survives_discard() {
+  sub run docs/t/01-a.md
+  local id
+  id="$(jget .id)"
+  sub discard "$id"
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r .id "$(hist)")" "$id" "line kept"
+}
+
+test_history_applied_event() {
+  sub run docs/t/01-a.md
+  local id
+  id="$(jget .id)"
+  sub apply "$id"
+  assert_rc 0 || return 1
+  assert_eq "$(wc -l < "$(hist)" | tr -d ' ')" 2 lines
+  local l
+  l="$(hline 2)"
+  assert_eq "$(jq -c '{type, id, event}' <<<"$l")" "{\"type\":\"event\",\"id\":\"$id\",\"event\":\"applied\"}" event
+  assert_match "$(jq -r .at <<<"$l")" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' at
+}
+
+test_history_failed_apply_no_event() {
+  sub run docs/t/01-a.md
+  local id
+  id="$(jget .id)"
+  echo changed > README.md
+  sub apply "$id"
+  assert_rc 1 || return 1
+  assert_eq "$(wc -l < "$(hist)" | tr -d ' ')" 1 "no event line"
+}
+
+test_history_parallel() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=1
+  write_ticket docs/t/02-b.md b.txt
+  write_ticket docs/t/03-c.md c.txt
+  commit_all bc
+  sub submit docs/t/01-a.md docs/t/02-b.md docs/t/03-c.md
+  assert_rc 0 || return 1
+  sub wait $(jget -r '.[].id')
+  assert_rc 0 || return 1
+  assert_eq "$(wc -l < "$(hist)" | tr -d ' ')" 3 lines
+  jq -c . "$(hist)" >/dev/null || fail "history has a broken line"
+  assert_eq "$(jq -r .id "$(hist)" | sort -u | wc -l | tr -d ' ')" 3 "distinct ids"
+}
+
+# ---- stats (11) ----------------------------------------------------------
+
+# hjob <id> <repo> <model> <state> <status|null> <checks_ok|null> <duration|null> <tin|null> <tout|null> [days-ago]
+hjob() {
+  local created
+  created="$(date -u -r $(( $(date +%s) - ${10:-0} * 86400 )) +%Y-%m-%dT%H:%M:%SZ)"
+  jq -cn --arg id "$1" --arg repo "$2" --arg model "$3" --arg state "$4" --arg created "$created" \
+    --argjson status "$( [[ $5 == null ]] && echo null || echo "\"$5\"")" \
+    --argjson ok "$6" --argjson dur "$7" --argjson tin "$8" --argjson tout "$9" '
+    {type: "job", id: $id, repo: $repo, ticket: "docs/t/x.md", model: $model, runner: "local",
+     created_at: $created, finished_at: $created, duration_s: $dur, state: $state, status: $status,
+     checks_ok: $ok, files_changed: 1, insertions: 1, deletions: 0,
+     tokens: (if $tin == null then null else {input: $tin, output: $tout, total: ($tin + $tout)} end),
+     resume_of: null}' >> "$(hist)"
+}
+hevent() { jq -cn --arg id "$1" '{type: "event", id: $id, event: "applied", at: "2026-01-01T00:00:00Z"}' >> "$(hist)"; }
+
+# A: done/ok m1, B: partial m1, C: failed m2, D: done but checks failed m2, E: other repo, A and D applied (A twice).
+sample_history() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20
+  hjob B "$TOP" m1 finished partial true 20 40 10
+  hjob C "$TOP" m2 failed null null null null null
+  hjob D "$TOP" m2 finished done false 30 8 2
+  hjob E /elsewhere m1 finished done true 5 1 1
+  hevent A
+  hevent A
+  hevent D
+}
+
+test_stats_empty() {
+  sub stats
+  assert_rc 0 || return 1
+  assert_eq "$(jget .jobs)" 0 jobs
+  assert_eq "$(jget .scope)" repo scope
+  assert_eq "$(jget .repo)" "$TOP" repo
+  assert_eq "$(jget .success_rate)" null success_rate
+  assert_eq "$(jget .apply_rate)" null apply_rate
+  assert_eq "$(jget -c .by_model)" '{}' by_model
+}
+
+test_stats_counts() {
+  sample_history
+  sub stats
+  assert_rc 0 || return 1
+  assert_eq "$(jget .jobs)" 4 jobs
+  assert_eq "$(jget -c .by_state)" '{"finished":3,"failed":1}' by_state
+  assert_eq "$(jget -c .by_status)" '{"done":2,"partial":1,"blocked":0,"none":1}' by_status
+  assert_eq "$(jget .success)" 1 success
+  assert_eq "$(jget .success_rate)" 0.25 success_rate
+  assert_eq "$(jget .applied)" 2 applied
+  assert_eq "$(jget .apply_rate)" 0.5 apply_rate
+  assert_eq "$(jget -c .duration_s)" '{"total":60,"median":20}' duration
+  assert_eq "$(jget -c .tokens)" '{"input":128,"output":32,"total":160}' tokens
+  assert_eq "$(jget -c .by_model.m1)" '{"jobs":2,"success":1,"applied":1,"tokens_total":150}' m1
+  assert_eq "$(jget -c .by_model.m2)" '{"jobs":2,"success":0,"applied":1,"tokens_total":10}' m2
+}
+
+test_stats_all() {
+  sample_history
+  sub stats --all
+  assert_rc 0 || return 1
+  assert_eq "$(jget .scope)" all scope
+  assert_eq "$(jget .repo)" null repo
+  assert_eq "$(jget .jobs)" 5 jobs
+  assert_eq "$(jget .by_model.m1.jobs)" 3 m1
+}
+
+test_stats_median_even() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 1 1
+  hjob B "$TOP" m1 finished done true 30 1 1
+  sub stats
+  assert_eq "$(jget .duration_s.median)" 20 median
+}
+
+test_stats_since() {
+  mkdir -p "$SUBCON_STATE"
+  hjob OLD "$TOP" m1 finished done true 10 1 1 10
+  hjob NEW "$TOP" m1 finished done true 10 1 1 0
+  sub stats --since 7d
+  assert_rc 0 || return 1
+  assert_eq "$(jget .jobs)" 1 7d
+  assert_eq "$(jget .since)" 7d since
+  sub stats --since 2h
+  assert_eq "$(jget .jobs)" 1 2h
+  sub stats
+  assert_eq "$(jget .jobs)" 2 none
+  assert_eq "$(jget .since)" null since-null
+}
+
+test_stats_bad_args() {
+  local a
+  for a in 7x abc 7 d -1d; do
+    sub stats --since "$a"
+    assert_rc 1 || fail "accepted --since $a"
+  done
+  sub stats --bogus
+  assert_rc 1
+}
+
+test_stats_text() {
+  sample_history
+  sub stats --text
+  assert_rc 0 || return 1
+  grep -q '^Jobs:' <<<"$OUT" || fail "no Jobs: line"
+  grep -q 'm1' <<<"$OUT" || fail "no model row"
+  ! jq -e . >/dev/null 2>&1 <<<"$OUT" || fail "--text printed JSON"
+}
+
+test_stats_real_jobs() {
+  sub run docs/t/01-a.md
+  local id
+  id="$(jget .id)"
+  sub apply "$id"
+  FAKE_AGY_MODE=partial sub run docs/t/01-a.md
+  sub stats
+  assert_rc 0 || return 1
+  assert_eq "$(jget .jobs)" 2 jobs
+  assert_eq "$(jget .success)" 1 success
+  assert_eq "$(jget .applied)" 1 applied
+  assert_eq "$(jget .tokens.total)" 240 tokens
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

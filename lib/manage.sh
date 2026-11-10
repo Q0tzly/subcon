@@ -153,6 +153,7 @@ cmd_apply() {
     return 1
   fi
 
+  ( history_append_event "$id" applied ) || echo "subcon: failed to record history for $id" >&2
   json_out '{id: $id, applied: true}' --arg id "$id"
 }
 
