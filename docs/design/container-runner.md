@@ -47,7 +47,7 @@
 - この VM では実エンジン実行は不可（2026-11-11 に試行）: docker / podman が無く、mise 経由は podman-remote と nerdctl の CLI のみ。nerdctl-full で containerd 起動まではできたが、レジストリ CDN への TLS タイムアウトと runc の setns 拒否（`operation not permitted`）でコンテナを実行できない
 - コンテナ内の git は現行のマウント構成では使えない（2026-11-11 に Mac mini で検証済み）。worktree の `.git` ファイルが指すホスト側 gitdir がマウント外のため `fatal: not a git repository: .../.git/worktrees/<name>` になる。ファイル編集は問題ないが、コンテナ内で git を実行して失敗終了するエージェントはジョブごと落ちる（fake-agy の commit モードで実ジョブが exit 128 で失敗することを確認。ホスト側のパッチ生成・チェックは無事）
 - 対処の検証結果: 本体 `.git` を同じ絶対パスにマウントすれば gitdir は解決するが、(1) rw マウントはホストのリポジトリの `.git`（config・hooks を含む）への書き込みをコンテナに許すことになり隔離が崩れる、(2) ro マウントでは `git status` は動くが `git add` 以後の書き込み系が index.lock で失敗する、(3) macOS（virtiofs）ではマウント内のファイルが root 所有に見えるため、どちらの場合も `safe.directory` の設定が別途必要
-- 修正済み（票18）: container ジョブでは worktree の代わりにジョブ内へローカル clone を作り、`work/` の中に実体の `.git` を持たせた。あわせてイメージ側に `safe.directory`（`/work` のみ）を入れた
+- 修正済み（票18）: container ジョブでは worktree の代わりにジョブ内へローカル clone を作り、`work/` の中に実体の `.git` を持たせた。あわせてイメージ側に `safe.directory`（`/work` のみ）を入れた。Mac mini の実機で再検証済み: commit モードの実ジョブが finished / done になり、コンテナ内のコミットをホスト側が `checks.committed: true` として検出できた（修正前は exit 128 でジョブ失敗）
 
 ## 票への分割
 
