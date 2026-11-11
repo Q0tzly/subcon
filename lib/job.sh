@@ -300,7 +300,7 @@ job_exec() {
   fi
 
   export SUBCON_PROMPT_FILE="$prompt_file"
-  export SUBCON_MODEL="$model"
+  export SUBCON_JOB_MODEL="$model"
   export SUBCON_TIMEOUT="$timeout"
   export SUBCON_SCHEMA="$SUBCON_SCHEMA"
   export SUBCON_SETTINGS="$SUBCON_SETTINGS"

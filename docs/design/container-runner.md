@@ -14,7 +14,7 @@
 2. `runners/container` がスキーマファイルを `$job_dir/schema.json` にコピーする（コンテナ内パスを `/job/schema.json` に固定するため）
 3. エンジンでコンテナを起動する:
    - マウント: `$job_dir/work` → `/work`（rw）、`$job_dir` → `/job`（rw）、`$HOME/.gemini` → `/home/runner/.gemini`（rw、認証情報と会話 DB）
-   - 環境変数: `HOME=/home/runner`、`SUBCON_PROMPT_FILE=/job/prompt.txt`、`SUBCON_SCHEMA=/job/schema.json`、`SUBCON_SETTINGS` / `SUBCON_MODEL` / `SUBCON_TIMEOUT` / `SUBCON_CONVERSATION` はホストの値をそのまま渡す
+   - 環境変数: `HOME=/home/runner`、`SUBCON_PROMPT_FILE=/job/prompt.txt`、`SUBCON_SCHEMA=/job/schema.json`、`SUBCON_SETTINGS` / `SUBCON_JOB_MODEL` / `SUBCON_TIMEOUT` / `SUBCON_CONVERSATION` はホストの値をそのまま渡す
    - `--workdir /work`、`--rm`、`--name subcon-<ジョブID>`、`--user <ホストの uid:gid>`（worktree のファイル所有者をホスト側と一致させる）
 4. コンテナ内では `container-entry.sh` が agy を実行し、`/job/agy.stream` と `/job/agy.json` を書く
 5. 終了コードは agy のものをそのまま返す。以後の後処理（チェック・パッチ生成・`result.json`）はホスト側が local と共通に行う

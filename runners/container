@@ -48,7 +48,7 @@ rc=0
   -v "$job_dir/work:/work" -v "$job_dir:/job" -v "$home_dir/.gemini:/home/runner/.gemini" \
   -e HOME=/home/runner -e SUBCON_JOB_DIR=/job \
   -e SUBCON_PROMPT_FILE=/job/prompt.txt -e SUBCON_SCHEMA=/job/schema.json \
-  -e SUBCON_SETTINGS -e SUBCON_MODEL -e SUBCON_TIMEOUT \
+  -e SUBCON_SETTINGS -e SUBCON_JOB_MODEL="$SUBCON_JOB_MODEL" -e SUBCON_TIMEOUT \
   ${extra_env[@]+"${extra_env[@]}"} \
   "$image" /usr/local/bin/subcon-entry || rc=$?
 

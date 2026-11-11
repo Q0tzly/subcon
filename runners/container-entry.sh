@@ -17,7 +17,7 @@ stream="$job_dir/agy.stream"
 rc=0
 agy -p "$(cat "$SUBCON_PROMPT_FILE")" \
   ${resume_flags[@]+"${resume_flags[@]}"} \
-  --model "$SUBCON_MODEL" \
+  --model "$SUBCON_JOB_MODEL" \
   --mode accept-edits \
   --sandbox \
   --settings "$SUBCON_SETTINGS" \
