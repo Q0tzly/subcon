@@ -43,7 +43,9 @@
 ## 実装状況（2026-11-11）
 
 - 票16（ランナー本体）・票17（事前確認）とも実装済み。全テスト 82 件通過（fake engine による契約検証を含む）
-- 実エンジンでの煙テストは未実施。実施環境の制約（2026-11-11 にこの VM で試行）: docker / podman が無く、podman の apt 導入は失敗。mise 経由は podman-remote と nerdctl の CLI のみでエンジン本体は入らない。nerdctl-full（containerd 同梱）を直接取得して起動することはできたが、(1) レジストリの blob CDN へ TLS ハンドシェイクがタイムアウトしイメージを pull できない、(2) ローカル rootfs から import したイメージでも runc の setns が `operation not permitted` で塞がれコンテナを起動できない、の 2 点でこの VM では実行不可と判明。docker のある通常のマシン（Mac 等）で、イメージのビルドと `--runner container` の実ジョブ 1 件を確認する必要がある
+- 実エンジンでの煙テストは Mac mini（Apple Silicon、colima の docker）で実施済み（2026-11-11）。実 Containerfile のビルド成功（イメージ内 agy 1.5.5 を確認）、fake-agy に差し替えた変種イメージで `--runner container` の実ジョブが finished / done、パッチ生成まで確認。検証中に見つけた不具合: エントリスクリプトのモードがソース側のファイルモード依存で、環境によっては実行ユーザー（ホスト uid）が読めず起動に失敗する → Containerfile で `chmod 755` を明示するよう修正済み
+- この VM では実エンジン実行は不可（2026-11-11 に試行）: docker / podman が無く、mise 経由は podman-remote と nerdctl の CLI のみ。nerdctl-full で containerd 起動まではできたが、レジストリ CDN への TLS タイムアウトと runc の setns 拒否（`operation not permitted`）でコンテナを実行できない
+- 既知の制限（未検証の論点）: worktree の `.git` ファイルはホスト側リポジトリへの絶対パスを指すため、コンテナ内の git はそのままではリポジトリを解決できない。ファイル編集中心の agy の動作には影響しない見込みだが、実 agy がコンテナ内で git を使う場合の挙動は今後の確認事項
 
 ## 票への分割
 
