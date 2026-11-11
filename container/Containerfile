@@ -13,6 +13,9 @@ RUN useradd -m -s /bin/bash runner
 COPY runners/container-entry.sh /usr/local/bin/subcon-entry
 RUN chmod 755 /usr/local/bin/subcon-entry
 
+COPY drivers/agy /usr/local/bin/subcon-driver-agy
+RUN chmod 755 /usr/local/bin/subcon-driver-agy
+
 USER runner
 RUN git config --global --add safe.directory /work
 ENV PATH="/home/runner/.local/bin:${PATH}"

@@ -131,13 +131,14 @@ job_create() {
     conversation="$(jq -r '.conversation // empty' "$from_dir/result.json")"
   fi
 
-  if ! json_out '{v: 1, id: $id, repo: $repo, ticket: $ticket, base: $base, runner: $runner, model: $model, timeout: $timeout, created_at: $created_at}
+  if ! json_out '{v: 1, id: $id, repo: $repo, ticket: $ticket, base: $base, runner: $runner, driver: $driver, model: $model, timeout: $timeout, created_at: $created_at}
       + (if $resume_of == "" then {} else {resume_of: $resume_of, conversation: $conversation} end)' \
     --arg id "$job_id" \
     --arg repo "$repo" \
     --arg ticket "$rel_ticket" \
     --arg base "$base" \
     --arg runner "$runner" \
+    --arg driver agy \
     --arg model "$model" \
     --arg timeout "$timeout" \
     --arg created_at "$created_at" \
@@ -282,10 +283,12 @@ job_exec() {
   fi
 
   # 2. Run runner
-  local runner model timeout
+  local runner model timeout driver
   runner="$(jq -r .runner "$job_dir/meta.json")"
   model="$(jq -r .model "$job_dir/meta.json")"
   timeout="$(jq -r .timeout "$job_dir/meta.json")"
+  # Jobs created before meta.json recorded the driver ran agy.
+  driver="$(jq -r '.driver // "agy"' "$job_dir/meta.json")"
 
   local prompt_file="$job_dir/prompt.txt"
   local conversation
@@ -303,7 +306,7 @@ job_exec() {
   export SUBCON_JOB_MODEL="$model"
   export SUBCON_TIMEOUT="$timeout"
   export SUBCON_SCHEMA="$SUBCON_SCHEMA"
-  export SUBCON_SETTINGS="$SUBCON_SETTINGS"
+  export SUBCON_DRIVER="$driver"
 
   local runner_bin="$SUBCON_ROOT/runners/$runner"
   if [[ ! -x "$runner_bin" ]]; then
