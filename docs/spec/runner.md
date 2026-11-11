@@ -21,7 +21,7 @@
 1. `work/`: ジョブ専用の作業ディレクトリ（worktree または隔離 clone）。
 2. `meta.json`: ジョブのメタデータ。
 3. `ticket.md`: 発行対象となった作業票の内容。
-4. `prompt.txt`: agy に渡すプロンプト（`SUBCON_PROMPT_FILE` が指すファイル）。
+4. `prompt.txt`: バックエンドに渡すプロンプト（`SUBCON_PROMPT_FILE` が指すファイル）。
 
 ### 責務
 
@@ -43,11 +43,12 @@
 
 | 変数名 | 設定する側 | 意味 |
 | --- | --- | --- |
-| `SUBCON_PROMPT_FILE` | subcon 本体 | agy に渡すプロンプトファイルの絶対パス（前文と票、または resume プロンプトが書き込まれている） |
+| `SUBCON_DRIVER` | subcon 本体 | 選択されたドライバ名。ランナーは `drivers/<name>` を起動する |
+| `SUBCON_PROMPT_FILE` | subcon 本体 | バックエンドに渡すプロンプトファイルの絶対パス（前文と票、または resume プロンプトが書き込まれている） |
 | `SUBCON_SCHEMA` | subcon 本体 | バックエンドの報告フォーマットを強制する JSON スキーマファイルのパス（`schema/result.schema.json`） |
-| `SUBCON_JOB_MODEL` | subcon 本体 | ジョブで実行する agy のモデル ID（例: `gemini-3.8-flash-medium`） |
-| `SUBCON_TIMEOUT` | subcon 本体 | agy の `--print-timeout` に指定するタイムアウト文字列（例: `30m`） |
-| `SUBCON_CONVERSATION` | subcon 本体 | 再開（`resume`）時に引き継ぐ agy の会話 ID（初回実行時は未設定） |
+| `SUBCON_JOB_MODEL` | subcon 本体 | ジョブで実行するドライバのモデル ID（例: `gemini-3.8-flash-medium`） |
+| `SUBCON_TIMEOUT` | subcon 本体 | ドライバに渡すタイムアウト文字列（例: `30m`） |
+| `SUBCON_CONVERSATION` | subcon 本体 | 再開（`resume`）時に引き継ぐドライバの会話 ID（初回実行時は未設定） |
 
 ### 実装内部の環境変数（ランナーの実装や CI 内部でのみ使われる変数）
 
@@ -66,7 +67,7 @@
 
 ### local ランナー (`runners/local`)
 
-ホスト上の環境で直接 agy を実行する標準ランナー。
+ホスト上の環境で選択されたドライバを直接実行する標準ランナー。
 
 - **stream-json と会話 ID の回収**:
   - agy を `--output-format stream-json` で起動し、出力を `agy.stream` に保存する。

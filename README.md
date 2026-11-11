@@ -1,7 +1,7 @@
 # subcon
 
-Claude / Codex などの上位エージェントが、作業票を書いた実装ステップを agy 経由の Gemini Flash に下請けに出すための仕組み。
-上位は作業票を書き、Flash が実装し、上位が検収してコミットする。
+Claude / Codex などの上位エージェントが、作業票を書いた実装ステップを agy 経由の Gemini Flash に下請けに出すための仕組み。既定は Gemini Flash だが、`--driver claude` で Claude Code（Haiku）も実装役に選べる。
+上位は作業票を書き、実装役が実装し、上位が検収してコミットする。
 
 ルール（いつ渡すか・作業票の書式・検収・コミットの trailer）は [docs/delegation.md](docs/delegation.md)。
 
@@ -13,7 +13,7 @@ Claude / Codex などの上位エージェントが、作業票を書いた実�
 
 - `bin/subcon` → `~/.local/bin/subcon`
 - 各エージェントのグローバル指示から `subcon guide` を読ませる（ルールは docs/delegation.md）
-- 前提: `agy`（ログイン済み）と `jq`
+- 前提: 使うドライバに応じて `agy` または `claude`（いずれもログイン済み）と `jq`
 
 ## 使い方
 
@@ -31,7 +31,16 @@ subcon guide                       # ルール（docs/delegation.md）を表示
 subcon trailer                     # コミット用の Co-Authored-By 行
 ```
 
-ほかに `run`（submit + wait）、`show`、`list`、`commit`（`subcon commit`: 検収した変更を trailer 付きでコミットする）、`reject`（`subcon reject`: 理由を票に記録して差し戻し、再委任する）、`resume`（失敗したジョブを agy の会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
+ほかに `run`（submit + wait）、`show`、`list`、`commit`（`subcon commit`: 検収した変更を trailer 付きでコミットする）、`reject`（`subcon reject`: 理由を票に記録して差し戻し、再委任する）、`resume`（失敗したジョブをドライバの会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
+
+### ドライバ
+
+実装役は `--driver <name>` または環境変数 `SUBCON_DRIVER` で選ぶ。既定は `agy`。
+
+- `agy`: Gemini Flash（既定モデル `gemini-3.8-flash-medium`）。
+- `claude`: Claude Code（既定モデル `claude-haiku-5-5`）。
+- `container` / `ci` ランナーは `agy` ドライバのみ対応。
+- `resume` は元ジョブのドライバで固定される。
 
 ### container ランナー
 

@@ -49,6 +49,7 @@
   "ticket": "docs/design/feat/01-parser.md",
   "base": "0123456789abcdef0123456789abcdef01234567",
   "runner": "local",
+  "driver": "agy",
   "model": "gemini-3.8-flash-medium",
   "timeout": "30m",
   "created_at": "2026-11-11T09:00:00Z"
@@ -61,6 +62,7 @@
 - `ticket`: リポジトリルートからの票ファイルの相対パス（文字列）。
 - `base`: ジョブ開始時のベースコミットハッシュ（`HEAD` の SHA-1、文字列）。
 - `runner`: 使用したランナー名（文字列、例: `"local"`, `"container"`, `"ci"`）。
+- `driver`: 使用したドライバ名（文字列、例: `"agy"`, `"claude"`）。
 - `model`: 使用したモデル ID（文字列、例: `"gemini-3.8-flash-medium"`）。
 - `timeout`: ジョブに指定されたタイムアウト時間（文字列、例: `"30m"`）。
 - `created_at`: ジョブの作成時刻（ISO 8601 UTC 文字列）。
@@ -70,7 +72,7 @@
 `subcon resume` によって作成されたジョブの場合、上記に加えて以下の 2 フィールドが追加される:
 
 - `resume_of`: 再開元のジョブ ID（文字列）。
-- `conversation`: 再開対象となった agy の会話 ID（`conversation_id`、文字列）。
+- `conversation`: 再開対象となったドライバの会話 ID（`conversation_id`、文字列）。
 
 ## result.json
 
