@@ -24,6 +24,7 @@ usage: subcon new <feature>/<NN-name>
        subcon diff <id>
        subcon apply <id>
        subcon commit -m <message> [--edited] <id>
+       subcon reject -m <reason> [--model M] [--runner R] <id>
        subcon discard <id>...
        subcon stats [--all] [--since <N>d|<N>h] [--text]
        subcon guide
@@ -50,6 +51,7 @@ case "$cmd" in
   diff) cmd_diff "$@" ;;
   apply) cmd_apply "$@" ;;
   commit) cmd_commit "$@" ;;
+  reject) cmd_reject "$@" ;;
   discard) cmd_discard "$@" ;;
   stats) cmd_stats "$@" ;;
   trailer) cmd_trailer "$@" ;;

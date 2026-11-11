@@ -304,6 +304,208 @@ Reviewed-By: $SUBCON_REVIEWER"
   json_out '{id: $id, commit: $commit}' --arg id "$id" --arg commit "$commit_hash"
 }
 
+cmd_reject() {
+  local reason=""
+  local reason_set=0
+  local model=""
+  local runner=""
+  local id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -m)
+        [[ $# -ge 2 ]] || die "-m requires a value"
+        reason="$2"
+        reason_set=1
+        shift 2
+        ;;
+      --model)
+        [[ $# -ge 2 ]] || die "--model requires a value"
+        model="$2"
+        shift 2
+        ;;
+      --runner)
+        [[ $# -ge 2 ]] || die "--runner requires a value"
+        runner="$2"
+        shift 2
+        ;;
+      -*)
+        die "unknown option: $1"
+        ;;
+      *)
+        if [[ -z "$id" ]]; then
+          id="$1"
+          shift
+        else
+          die "unexpected argument: $1"
+        fi
+        ;;
+    esac
+  done
+
+  # Step 1: Check id is provided, job exists, and repo matches current repo
+  [[ -n "$id" ]] || die "job id required"
+
+  local dir
+  dir="$(job_dir "$id")"
+  if [[ ! -d "$dir" ]]; then
+    echo "subcon: unknown job id: $id" >&2
+    return 1
+  fi
+
+  local cur_repo
+  cur_repo="$(repo_top)" || return 1
+
+  local job_repo
+  job_repo="$(jq -r .repo "$dir/meta.json" 2>/dev/null || echo "")"
+  if [[ "$job_repo" != "$cur_repo" ]]; then
+    echo "subcon: job repository ($job_repo) does not match current repository ($cur_repo)" >&2
+    return 1
+  fi
+
+  # Step 2: -m check
+  if [[ $reason_set -eq 0 || -z "$reason" ]]; then
+    die "-m <reason> required"
+  fi
+
+  # Step 3: job_result state: finished check
+  local res rc=0
+  res="$(job_result "$id")" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    return 1
+  fi
+
+  local state
+  state="$(jq -r .state <<<"$res")"
+  if [[ "$state" != "finished" ]]; then
+    echo "subcon: job $id is not finished (state: $state)" >&2
+    return 1
+  fi
+
+  # Step 4: Delegation limit check (3 or more finished jobs in history for repo and ticket)
+  local ticket
+  ticket="$(jq -r .ticket "$dir/meta.json")"
+
+  local hfile
+  hfile="$(history_file)"
+  local count=0
+  if [[ -f "$hfile" ]]; then
+    count="$(jq -sr --arg repo "$cur_repo" --arg ticket "$ticket" '
+      map(select((has("event") | not) and .repo == $repo and .ticket == $ticket)) | length
+    ' "$hfile" 2>/dev/null || echo 0)"
+  fi
+  if [[ "$count" -ge 3 ]]; then
+    echo "subcon: delegation limit reached (already delegated $count times for $ticket)" >&2
+    return 1
+  fi
+
+  # Step 5: Ticket file exists and clean check
+  local ticket_path="$cur_repo/$ticket"
+  if [[ ! -f "$ticket_path" ]]; then
+    echo "subcon: ticket file not found: $ticket" >&2
+    return 1
+  fi
+
+  if [[ -n "$(git -C "$cur_repo" status --porcelain -- "$ticket" 2>/dev/null)" ]]; then
+    echo "subcon: ticket file has uncommitted changes: $ticket" >&2
+    return 1
+  fi
+
+  # Step 6: Append reject line to ticket
+  if ! JOB_ID="$id" REASON="$reason" awk '
+    /^## Notes([[:space:]]|$)/ {
+      found_notes = 1
+      in_notes = 1
+      print
+      next
+    }
+    in_notes && /^## / {
+      print "- 差し戻し（job " ENVIRON["JOB_ID"] "）: " ENVIRON["REASON"]
+      if (blanks != "") { printf "%s", blanks; blanks = "" }
+      in_notes = 0
+      inserted = 1
+      print
+      next
+    }
+    in_notes {
+      if ($0 ~ /^[[:space:]]*$/) {
+        blanks = blanks $0 "\n"
+        next
+      } else {
+        if (blanks != "") { printf "%s", blanks; blanks = "" }
+        print
+        next
+      }
+    }
+    {
+      last_line = $0
+      print
+    }
+    END {
+      if (!found_notes) {
+        if (NR > 0 && last_line !~ /^[[:space:]]*$/) print ""
+        print "## Notes"
+        print "- 差し戻し（job " ENVIRON["JOB_ID"] "）: " ENVIRON["REASON"]
+      } else if (in_notes && !inserted) {
+        print "- 差し戻し（job " ENVIRON["JOB_ID"] "）: " ENVIRON["REASON"]
+        if (blanks != "") printf "%s", blanks
+      }
+    }
+  ' "$ticket_path" | atomic_write "$ticket_path"; then
+    echo "subcon: failed to update ticket file" >&2
+    return 1
+  fi
+
+  # Step 7: Commit ticket file only
+  if ! git -C "$cur_repo" add -- "$ticket"; then
+    echo "subcon: failed to stage ticket" >&2
+    return 1
+  fi
+
+  local commit_msg
+  commit_msg="$(printf 'reject: %s\n\n%s\n' "$ticket" "$reason")"
+  if ! git -C "$cur_repo" commit -q -m "$commit_msg"; then
+    echo "subcon: commit failed" >&2
+    return 1
+  fi
+
+  # Step 8: Record rejected history event
+  ( history_append_event "$id" rejected ) || echo "subcon: failed to record history for $id" >&2
+
+  # Step 9: Launch new job with cmd_submit
+  local orig_runner orig_model
+  orig_runner="$(jq -r .runner "$dir/meta.json")"
+  orig_model="$(jq -r .model "$dir/meta.json")"
+
+  local effective_runner="${runner:-$orig_runner}"
+  local effective_model="${model:-$orig_model}"
+
+  local submit_out submit_rc=0
+  submit_out="$(cmd_submit --runner "$effective_runner" --model "$effective_model" "$ticket")" || submit_rc=$?
+
+  local new_id=""
+  if [[ $submit_rc -eq 0 && -n "$submit_out" ]]; then
+    new_id="$(jq -r '.[0].id // empty' <<<"$submit_out" 2>/dev/null || echo "")"
+  fi
+
+  if [[ $submit_rc -eq 0 && -n "$new_id" && "$new_id" != "null" ]]; then
+    json_out '{id: $id, reject_of: $old, ticket: $ticket, error: null}' \
+      --arg id "$new_id" \
+      --arg old "$id" \
+      --arg ticket "$ticket"
+    return 0
+  else
+    local err
+    err="$(jq -r '.[0].error // empty' <<<"$submit_out" 2>/dev/null || echo "")"
+    [[ -n "$err" ]] || err="failed to submit job"
+    json_out '{id: null, reject_of: $old, ticket: $ticket, error: $err}' \
+      --arg old "$id" \
+      --arg ticket "$ticket" \
+      --arg err "$err"
+    return 4
+  fi
+}
+
 cmd_discard() {
   [[ $# -gt 0 ]] || die "at least one job id required"
 
