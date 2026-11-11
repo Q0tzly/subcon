@@ -8,10 +8,11 @@ SUBCON="$ROOT/bin/subcon"
 FAKEBIN="$(mktemp -d)"
 ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 ln -s "$ROOT/drivers/agy" "$FAKEBIN/subcon-driver-agy"
+ln -s "$ROOT/drivers/claude" "$FAKEBIN/subcon-driver-claude"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
 unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING SUBCON_REVIEWER
-unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL FAKE_GH_NO_AUTH FAKE_GH_FOREIGN_OWNER
+unset GEMINI_API_KEY ANTHROPIC_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL FAKE_GH_NO_AUTH FAKE_GH_FOREIGN_OWNER
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
@@ -1324,7 +1325,15 @@ test_driver_container_guard() {
   make_driver_tree
   subx submit --runner container --driver fakeok docs/t/01-a.md
   assert_rc 1 || return 1
-  grep -q "supports the agy driver only" "$T/err" || fail "stderr: $(cat "$T/err")"
+  grep -q "supports the agy and claude drivers only" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_driver_ci_guard() {
+  make_driver_tree
+  subx submit --runner ci --driver fakeok docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "the ci runner supports the agy driver only" "$T/err" || fail "stderr: $(cat "$T/err")"
   assert_eq "$(jobcount)" 0 jobs
 }
 
@@ -1532,6 +1541,27 @@ test_container_entry_uses_driver() {
   grep -q 'fake change' "$d/work/README.md" || fail "driver did not run the backend in work"
 }
 
+test_container_entry_driver_claude() {
+  local d="$T/entry-job-claude" bin="$T/driverbin-claude" fc
+  fc="$(fake_claude_path)"
+  mkdir -p "$d/work" "$bin"
+  ln -s "$ROOT/drivers/claude" "$bin/subcon-driver-claude"
+  printf '# t\n\n## Files\n\n- README.md\n\n## Acceptance\n\n- [ ] true\n' > "$d/prompt.txt"
+  ( cd "$d/work" && \
+    SUBCON_JOB_DIR="$d" \
+    SUBCON_DRIVER=claude \
+    SUBCON_PROMPT_FILE="$d/prompt.txt" \
+    SUBCON_JOB_MODEL="claude-haiku-5-5" \
+    SUBCON_TIMEOUT="30m" \
+    SUBCON_SCHEMA="$ROOT/schema/result.schema.json" \
+    PATH="$bin:$fc:$(clean_path)" \
+    "$ROOT/runners/container-entry.sh" ) || fail "container entry (claude) failed"
+  [[ -s "$d/agy.json" ]] || fail "entry produced no agy.json"
+  assert_eq "$(jq -r .status "$d/agy.json")" SUCCESS entry.agy.status
+  assert_eq "$(jq -r .structured_output.summary "$d/agy.json")" "fake claude did it" entry.agy.summary
+  grep -q 'fake change' "$d/work/README.md" || fail "claude driver did not run the backend in work"
+}
+
 test_container_run_ok() {
   PATH="$(engine_bin):$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
     sub submit --runner container docs/t/01-a.md
@@ -1575,6 +1605,33 @@ test_container_no_api_key_env() {
     sub run --runner container docs/t/01-a.md
   assert_rc 0 || return 1
   ! grep -q "GEMINI_API_KEY" "$T/engine.log" || fail "api key env passed while unset: $(cat "$T/engine.log")"
+}
+
+test_container_claude_no_key() {
+  local fc
+  fc="$(fake_claude_path)"
+  PATH="$(engine_bin):$fc:$PATH" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" ANTHROPIC_API_KEY="" \
+    sub submit --runner container --driver claude docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "ANTHROPIC_API_KEY" "$T/err" || fail "stderr does not mention ANTHROPIC_API_KEY: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_container_claude_run_ok() {
+  local fc
+  fc="$(fake_claude_path)"
+  PATH="$(engine_bin):$fc:$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    ANTHROPIC_API_KEY="dummy-anthropic-key-37" sub run --runner container --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .state)" finished state
+  assert_eq "$(jget .status)" done status
+  ID="$(jget .id)"
+  assert_eq "$(jq -r .driver "$(jobdir "$ID")/meta.json")" claude meta.driver
+  grep -q "ENV SUBCON_DRIVER=claude" "$T/engine.log" || fail "SUBCON_DRIVER not passed: $(cat "$T/engine.log")"
+  grep -qx "ENV ANTHROPIC_API_KEY" "$T/engine.log" || fail "api key not passed by name: $(cat "$T/engine.log")"
+  ! grep -q "dummy-anthropic-key-37" "$T/engine.log" || fail "api key value leaked into log"
+  grep -q "MOUNT $HOME/.claude -> /home/runner/.claude" "$T/engine.log" || fail "no .claude mount: $(cat "$T/engine.log")"
+  ! grep -q "MOUNT $HOME/.gemini" "$T/engine.log" || fail ".gemini mounted for a claude job: $(cat "$T/engine.log")"
 }
 
 test_container_resume() {
