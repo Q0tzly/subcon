@@ -141,6 +141,21 @@ cmd_stats() {
             }
           }) | from_entries)
         end
+      ),
+      "by_driver": (
+        if $n_jobs == 0 then
+          {}
+        else
+          ($jobs | group_by(.driver // "agy") | map({
+            key: (.[0].driver // "agy"),
+            value: {
+              "jobs": length,
+              "success": (map(select(.state == "finished" and .status == "done" and .checks_ok == true)) | length),
+              "applied": (map(select($applied_ids[.id] == true)) | length),
+              "tokens_total": (map(select(.tokens != null) | .tokens.total // 0) | add // 0)
+            }
+          }) | from_entries)
+        end
       )
     }
     ' "$input_file")" || return 1
@@ -169,6 +184,16 @@ cmd_stats() {
       else
         "  MODEL                       JOBS   SUCCESS   APPLIED    TOKENS",
         (.by_model | to_entries[] | "  \((.key | rpad(26))) \((.value.jobs | lpad(5))) \((.value.success | lpad(9))) \((.value.applied | lpad(9))) \((.value.tokens_total | lpad(9)))")
+      end
+    ),
+    "",
+    "Driver breakdown:",
+    (
+      if (.by_driver | length) == 0 then
+        "  (no jobs)"
+      else
+        "  DRIVER                      JOBS   SUCCESS   APPLIED    TOKENS",
+        (.by_driver | to_entries[] | "  \((.key | rpad(26))) \((.value.jobs | lpad(5))) \((.value.success | lpad(9))) \((.value.applied | lpad(9))) \((.value.tokens_total | lpad(9)))")
       end
     )
   '

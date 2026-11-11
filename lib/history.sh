@@ -71,6 +71,7 @@ history_append_job() {
       ticket: $meta.ticket,
       model: $meta.model,
       runner: $meta.runner,
+      driver: ($meta.driver // "agy"),
       created_at: $meta.created_at,
       finished_at: $finished_at,
       duration_s: (

@@ -165,6 +165,7 @@
   "ticket": "docs/design/feat/01-parser.md",
   "model": "gemini-3.8-flash-medium",
   "runner": "local",
+  "driver": "agy",
   "created_at": "2026-11-11T09:00:00Z",
   "finished_at": "2026-11-11T09:05:00Z",
   "duration_s": 300.5,
@@ -188,6 +189,7 @@
 - `type`: 固定値 `"job"`。
 - `v`: フォーマットのバージョン番号（整数: `1`）。
 - `id`, `repo`, `ticket`, `model`, `runner`, `created_at`, `state`, `status`: ジョブ情報。
+- `driver`: 実行したドライバ名（`meta.json` の `driver` を写す。ドライバ記録の無い旧ジョブは `"agy"` として記録される）。
 - `finished_at`: ジョブ終了時刻（ISO 8601 UTC 文字列）。
 - `duration_s`: agy 出力の `duration_seconds`（数値、無ければ `null`）。
 - `checks_ok`: `checks.ok` の値（真偽値、チェックが無ければ `null`）。

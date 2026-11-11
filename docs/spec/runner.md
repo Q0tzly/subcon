@@ -75,6 +75,7 @@
   - stream-json の最初の `init` イベントから `conversation_id` を取得する。
   - 最後の `result` イベントから `structured_output` 等を含む JSON を抽出し、`agy.json` に書き出す。
   - agy が結果を出力する前に SIGKILL 等で停止した場合でも、`init` イベントで得られた `conversation_id` を用いて `{status: "ERROR", conversation_id: "...", error: "agy exited without a result"}` を `agy.json` に保存することで、後から `subcon resume` による再開を可能にする。
+  - 会話 ID はこの回収（ベストエフォート）で得る（agy / opencode）。最初のイベントが出る前に kill された場合は ID が残らず resume できないが、作業は始まっていないため同じ票を再 submit してよい。`claude` ドライバは実行前に ID を確定するため kill 後も resume できる（保証レベルの詳細は [backend.md](backend.md) の「会話 ID の保証レベル」を参照）。
 
 ### container ランナー (`runners/container`)
 
