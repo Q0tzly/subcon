@@ -199,7 +199,9 @@ subcon の実装役は現在 agy 前提に固定されている。「どこで�
 
 - container / ci での claude ドライバ対応（イメージへの claude 同梱と
   認証の持ち込み、CI マシン側の claude 認証が別途必要）。
+  → 後続の設計・決定は [phase6-followups.md](phase6-followups.md)。
 - OpenCode 等の第三ドライバ、ドライバの外部配布（プラグイン形式）。
+  → OpenCode の検証結果と暫定決定も phase6-followups.md に記録。
 - Go 化（フェーズ C 着手前という既定方針どおり、本分離とは別軸）。
 
 ## 決定・未決事項
