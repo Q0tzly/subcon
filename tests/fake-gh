@@ -16,6 +16,15 @@ mkdir -p "$state/runs" "$state/artifacts"
 cmd="${1:-}"
 if [[ $# -gt 0 ]]; then shift; fi
 case "$cmd" in
+  auth)
+    # auth status: logged in unless FAKE_GH_NO_AUTH is set.
+    if [[ -n "${FAKE_GH_NO_AUTH:-}" ]]; then
+      echo "fake-gh: not logged in" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+
   workflow)
     # workflow run <file> -f k=v ...
     if [[ $# -gt 0 ]]; then shift; fi  # "run"
