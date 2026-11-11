@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject formats history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
+# Groups: ticket submit query manage commit reject formats runnerenv history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1603,10 +1603,38 @@ test_formats_legacy_without_v() {
   assert_rc 0 || return 1
 }
 
+# ---- runnerenv (26) --------------------------------------------------------
+
+test_runnerenv_container_env() {
+  PATH="$(engine_bin):$PATH" FAKE_ENGINE_LOG="$T/engine.log" FAKE_ENGINE_ENTRY="$ROOT/runners/container-entry.sh" \
+    sub submit --runner container --model env-model-1 docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .status)" done status
+  grep -q "ENV SUBCON_JOB_MODEL=env-model-1" "$T/engine.log" || fail "no SUBCON_JOB_MODEL env: $(cat "$T/engine.log")"
+  grep -q "ENV SUBCON_MODEL=" "$T/engine.log" && fail "legacy SUBCON_MODEL still passed: $(cat "$T/engine.log")"
+  return 0
+}
+
+test_runnerenv_local_flags() {
+  export FAKE_AGY_LOG="$T/agy.log"
+  submit_one --model flag-model-2 docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  grep -q -- "--model flag-model-2" "$T/agy.log" || fail "model did not reach agy: $(cat "$T/agy.log")"
+}
+
+test_runnerenv_user_knob() {
+  SUBCON_MODEL=knob-model sub submit docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  assert_eq "$(jq -r .model "$(jobdir "$ID")/meta.json")" knob-model meta.model
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats history stats resume preflight authwarn container containerpre cijob cirunner cipre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv history stats resume preflight authwarn container containerpre cijob cirunner cipre)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
