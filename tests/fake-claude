@@ -13,15 +13,23 @@ if [[ "${1:-}" == "auth" ]]; then
   exit 0
 fi
 
-session="" resume="" prompt=""
+session="" resume="" prompt="" mcp_seen=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --session-id) session="$2"; shift 2 ;;
     --resume) resume="$2"; shift 2 ;;
-    --model|--output-format|--permission-mode|--allowedTools|--json-schema|--mcp-config) shift 2 ;;
+    --mcp-config) mcp_seen=1; shift 2 ;;
+    --model|--output-format|--permission-mode|--allowedTools|--json-schema) shift 2 ;;
     -p|--print|--strict-mcp-config) shift ;;
     --*) shift ;;
-    *) prompt="$1"; shift ;;
+    *)
+      # Real claude's --mcp-config is variadic: a bare value after it is
+      # treated as another config path and fails. Mimic that.
+      if [[ "$mcp_seen" -eq 1 ]]; then
+        echo "Error: Invalid MCP configuration" >&2
+        exit 1
+      fi
+      prompt="$1"; shift ;;
   esac
 done
 [[ -n "$resume" ]] && session="$resume"
