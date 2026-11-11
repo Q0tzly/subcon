@@ -10,7 +10,7 @@ ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
 unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING
-unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL FAKE_GH_NO_AUTH
+unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL FAKE_GH_NO_AUTH FAKE_GH_FOREIGN_OWNER
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
@@ -1201,6 +1201,25 @@ test_cirunner_ok() {
   assert_eq "$(jget .status)" done status || return 1
   assert_eq "$(jget -r '.checks.files_changed | join(",")')" "README.md" files_changed || return 1
   grep -q "fake change" "$(jget .patch)" || fail "patch lacks the fake change: $(cat "$(jget .patch)")"
+}
+
+test_cirunner_foreign_owner() {
+  mkdir -p "$T/repo/.github/workflows" && touch "$T/repo/.github/workflows/subcon-job.yml"
+  # The ownership failure only bites on filesystems that refuse chown (the
+  # production state dir lives on one under $HOME); /tmp allows it, so run
+  # this job with its state under $HOME and clean up afterwards.
+  local hstate st has=0
+  hstate="$(mktemp -d "$HOME/subcon-test-state.XXXXXX")"
+  PATH="$(gh_bin):$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
+    FAKE_GH_FOREIGN_OWNER=1 SUBCON_STATE="$hstate" \
+    sub run --runner ci docs/t/01-a.md
+  st="$(jget .state)"
+  [[ -f "$hstate/jobs/$(jget .id)/agy.json" ]] && has=1
+  chmod -R u+rwX "$hstate" 2>/dev/null || true
+  rm -rf "$hstate"
+  assert_rc 0 || return 1
+  assert_eq "$st" finished state || return 1
+  [[ $has -eq 1 ]] || fail "agy.json not restored to the job dir"
 }
 
 test_cirunner_workflow_failure() {

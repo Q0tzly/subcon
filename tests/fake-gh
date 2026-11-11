@@ -60,6 +60,14 @@ case "$cmd" in
       SUBCON_CI_MODEL="$model" SUBCON_CI_TIMEOUT="$timeout" \
       bash "${FAKE_GH_SUBCON_ROOT:?FAKE_GH_SUBCON_ROOT required}/ci/run-job.sh" >/dev/null 2>&1 || true
     cp "$rt/subcon-$job/artifact/"* "$art/" 2>/dev/null || true
+    # Optionally repack work.tar.gz with foreign ownership (a macOS runner's
+    # uid), like a tarball produced on a real self-hosted machine.
+    if [[ -n "${FAKE_GH_FOREIGN_OWNER:-}" && -f "$art/work.tar.gz" ]] && tar --version 2>/dev/null | grep -qi gnu; then
+      fgx="$(mktemp -d)"
+      tar -xzf "$art/work.tar.gz" -C "$fgx" 2>/dev/null || true
+      tar --owner=501 --group=50 -czf "$art/work.tar.gz" -C "$fgx" work
+      rm -rf "$fgx"
+    fi
     jq -cn --argjson id "$id" --arg t "subcon $job" --arg c "${FAKE_GH_CONCLUSION:-success}" \
       '{databaseId: $id, displayTitle: $t, status: "completed", conclusion: $c}' > "$state/runs/$id.json"
     ;;
