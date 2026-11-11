@@ -1,0 +1,68 @@
+#!/bin/bash
+# Stand-in for opencode (the OpenCode CLI) in tests, linked as `opencode`
+# on PATH. Behaviour comes from FAKE_OPENCODE_MODE:
+#   ok        change the file, emit NDJSON events whose final text part is
+#             the bare report JSON, exit 0
+#   fenced    like ok, but the report is wrapped in a ```json fence
+#   prose     like ok, but prose surrounds the report JSON
+#   noreport  change the file, final text is prose with no JSON at all
+#   badstatus like ok, but the report's status is outside the schema enum
+#   error     change the file, emit only step_start, exit 1
+#   stall     emit nothing and sleep (a marker file at FAKE_OPENCODE_MARKER
+#             makes the next invocation behave as ok, for watchdog retries)
+set -uo pipefail
+
+session="ses-fake-1"
+message=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session) session="$2"; shift 2 ;;
+    -m|--model) shift 2 ;;
+    --format) shift 2 ;;
+    run|--dangerously-skip-permissions) shift ;;
+    --*) shift ;;
+    *) message="$1"; shift ;;
+  esac
+done
+
+mode="${FAKE_OPENCODE_MODE:-ok}"
+if [[ "$mode" == "stall" ]]; then
+  marker="${FAKE_OPENCODE_MARKER:-}"
+  if [[ -n "$marker" && ! -f "$marker" ]]; then
+    : > "$marker"
+    sleep 30
+    exit 0
+  fi
+  mode="ok"
+fi
+
+# A resumed run gets no ticket (the session remembers it): continue on the
+# file already changed.
+if [[ "$message" == *'## Files'* ]]; then
+  f="$(awk '/^## /{ f = ($0 ~ /^## Files/); next }
+    f && /^[-*][[:space:]]/ { sub(/^[-*][[:space:]]+/, ""); gsub(/`/, ""); print; exit }' <<<"$message")"
+else
+  f="$(git status --porcelain 2>/dev/null | awk 'NR == 1 { print $2 }')"
+fi
+[[ -n "${f:-}" ]] && echo "fake change" >> "$f"
+
+jq -cn --arg s "$session" '{type: "step_start", sessionID: $s, part: {type: "step-start", sessionID: $s}}'
+if [[ "$mode" == "error" ]]; then
+  exit 1
+fi
+
+status="done"
+[[ "$mode" == "badstatus" ]] && status="weird"
+report="$(jq -cn --arg f "${f:-README.md}" --arg st "$status" \
+  '{status: $st, summary: "fake opencode did it", files_changed: [$f], commands_run: [], design_questions: [], issues_found: []}')"
+
+case "$mode" in
+  fenced) text="$(printf '```json\n%s\n```' "$report")" ;;
+  prose) text="$(printf 'Here is the result of my work.\n%s\nThat is all.' "$report")" ;;
+  noreport) text="I made the change but wrote no JSON report." ;;
+  *) text="$report" ;;
+esac
+jq -cn --arg s "$session" --arg t "$text" '{type: "text", sessionID: $s, part: {type: "text", text: $t}}'
+jq -cn --arg s "$session" '{type: "step_finish", sessionID: $s, part: {type: "step-finish", cost: 0, tokens: {total: 60, input: 50, output: 8, reasoning: 2, cache: {read: 3, write: 1}}}}'
+jq -cn --arg s "$session" '{type: "step_finish", sessionID: $s, part: {type: "step-finish", cost: 0, tokens: {total: 72, input: 50, output: 12, reasoning: 3, cache: {read: 4, write: 2}}}}'
+exit 0

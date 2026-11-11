@@ -1344,6 +1344,13 @@ fake_claude_path() {
   echo "$bin"
 }
 
+opencode_path() {
+  local bin="$T/ocbin"
+  mkdir -p "$bin"
+  ln -s "$ROOT/tests/fake-opencode" "$bin/opencode"
+  echo "$bin"
+}
+
 test_driver_claude_fake_ok() {
   make_driver_tree
   local fc
@@ -1419,6 +1426,154 @@ test_driver_claude_preflight_missing() {
   assert_rc 1 || return 1
   grep -q "claude not found" "$T/err" || fail "stderr: $(cat "$T/err")"
   assert_eq "$(jobcount)" 0 jobs
+}
+
+test_driver_opencode_ok() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  PATH="$oc:$PATH" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  local d
+  d="$(jobdir "$ID")"
+  assert_eq "$(jq -r .driver "$d/meta.json")" opencode meta.driver
+  assert_eq "$(jq -r .model "$d/meta.json")" sakura/preview/Kimi-K2.7-Code meta.model
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .report.summary)" "fake opencode did it" report.summary
+  assert_eq "$(result "$ID" .conversation)" ses-fake-1 conversation
+  assert_eq "$(jq -r .usage.input_tokens "$d/agy.json")" 100 usage.input
+  assert_eq "$(jq -r .usage.output_tokens "$d/agy.json")" 20 usage.output
+  assert_eq "$(jq -r .usage.total_tokens "$d/agy.json")" 132 usage.total
+  assert_eq "$(jq -r .usage.thinking_tokens "$d/agy.json")" 5 usage.thinking
+  assert_eq "$(jq -r .usage.cache_read_tokens "$d/agy.json")" 7 usage.cache_read
+  assert_eq "$(jq -r 'has("cost_usd")' "$d/agy.json")" false agy.cost_absent
+  [[ -s "$d/prompt.driver.txt" ]] || fail "augmented prompt not written"
+  grep -q "status" "$d/prompt.driver.txt" || fail "augmented prompt lacks the schema"
+}
+
+test_driver_opencode_fenced() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  export FAKE_OPENCODE_MODE=fenced
+  PATH="$oc:$PATH" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .report.summary)" "fake opencode did it" report.summary
+}
+
+test_driver_opencode_prose() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  export FAKE_OPENCODE_MODE=prose
+  PATH="$oc:$PATH" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .report.summary)" "fake opencode did it" report.summary
+}
+
+test_driver_opencode_noreport() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  export FAKE_OPENCODE_MODE=noreport
+  PATH="$oc:$PATH" subx run --driver opencode docs/t/01-a.md
+  assert_rc 2 || return 1
+  assert_eq "$(jget .state)" finished state
+  assert_eq "$(jget .status)" null status
+  assert_eq "$(jget .report)" null report
+  local d
+  d="$(jobdir "$(jget .id)")"
+  assert_eq "$(jq -r 'has("structured_output")' "$d/agy.json")" false agy.structured_absent
+}
+
+test_driver_opencode_badstatus() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  export FAKE_OPENCODE_MODE=badstatus
+  PATH="$oc:$PATH" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .state)" finished state
+  assert_eq "$(result "$ID" .status)" null status
+}
+
+test_driver_opencode_error() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  export FAKE_OPENCODE_MODE=error
+  PATH="$oc:$PATH" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .state)" failed state
+  assert_eq "$(result "$ID" .conversation)" ses-fake-1 conversation
+}
+
+test_driver_opencode_watchdog() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  export FAKE_OPENCODE_MODE=stall FAKE_OPENCODE_MARKER="$T/oc-marker"
+  PATH="$oc:$PATH" SUBCON_OPENCODE_WATCHDOG=2 subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .state)" finished state
+  assert_eq "$(result "$ID" .status)" done status
+}
+
+test_driver_opencode_resume() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  export FAKE_OPENCODE_MODE=error
+  PATH="$oc:$PATH" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  export FAKE_OPENCODE_MODE=ok
+  PATH="$oc:$PATH" subx resume "$ID"
+  assert_rc 0 || return 1
+  local new
+  new="$(jget '.[0].id')"
+  wait_done "$new" || return 1
+  assert_eq "$(result "$new" .status)" done resumed.status
+  assert_eq "$(result "$new" .conversation)" ses-fake-1 resumed.conversation
+}
+
+test_driver_opencode_preflight_missing() {
+  make_driver_tree
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "opencode not found" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_driver_opencode_custom_model_trailer() {
+  make_driver_tree
+  local oc
+  oc="$(opencode_path)"
+  PATH="$oc:$PATH" subx submit --driver opencode --model sakura/custom-model-x docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  PATH="$oc:$PATH" subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" '^Co-Authored-By: sakura/custom-model-x <[^>]+>$' trailer
 }
 
 # ---- preflight (14) --------------------------------------------------------
