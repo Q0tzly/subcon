@@ -43,7 +43,7 @@
 ## 実装状況（2026-11-11）
 
 - 票16（ランナー本体）・票17（事前確認）とも実装済み。全テスト 82 件通過（fake engine による契約検証を含む）
-- 実エンジンでの煙テストは未実施。この VM には docker / podman が無く、podman のインストールも apt の制約でできなかった。docker のあるマシン（Mac 等）で、イメージのビルドと `--runner container` の実ジョブ 1 件を確認する必要がある
+- 実エンジンでの煙テストは未実施。実施環境の制約（2026-11-11 にこの VM で試行）: docker / podman が無く、podman の apt 導入は失敗。mise 経由は podman-remote と nerdctl の CLI のみでエンジン本体は入らない。nerdctl-full（containerd 同梱）を直接取得して起動することはできたが、(1) レジストリの blob CDN へ TLS ハンドシェイクがタイムアウトしイメージを pull できない、(2) ローカル rootfs から import したイメージでも runc の setns が `operation not permitted` で塞がれコンテナを起動できない、の 2 点でこの VM では実行不可と判明。docker のある通常のマシン（Mac 等）で、イメージのビルドと `--runner container` の実ジョブ 1 件を確認する必要がある
 
 ## 票への分割
 
