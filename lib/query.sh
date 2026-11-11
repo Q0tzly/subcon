@@ -38,6 +38,7 @@ job_result() {
       --arg ticket "$ticket" \
       --arg state "$state" \
       '{
+        v: 1,
         id: $id,
         repo: (if $repo == "" then null else $repo end),
         ticket: (if $ticket == "" then null else $ticket end),
