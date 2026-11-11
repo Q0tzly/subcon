@@ -94,6 +94,13 @@ require_container() {
   "$engine" image inspect "$image" >/dev/null 2>&1 || die "container image not found: $image (build it from container/Containerfile)"
 }
 
+require_ci() {
+  local repo="$1"
+  command -v gh >/dev/null 2>&1 || die "ci runner requires gh: install the GitHub CLI"
+  gh auth status >/dev/null 2>&1 || die "gh is not authenticated: run gh auth login"
+  [[ -f "$repo/.github/workflows/subcon-job.yml" ]] || die "workflow not found: .github/workflows/subcon-job.yml (add the subcon-job workflow to this repository)"
+}
+
 agy_auth_mode() {
   local settings="${HOME:-}/.gemini/antigravity-cli/settings.json"
   local provider=""

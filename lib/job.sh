@@ -47,6 +47,10 @@ cmd_submit() {
   local repo
   repo="$(repo_top)"
 
+  if [[ "$runner" == "ci" ]]; then
+    require_ci "$repo"
+  fi
+
   # Step 1: Validate all tickets upfront. If any fails, exit 1 without creating any job.
   local t
   for t in "${tickets[@]}"; do
@@ -236,6 +240,10 @@ cmd_resume() {
 
   if [[ "$runner" == "container" ]]; then
     require_container
+  fi
+
+  if [[ "$runner" == "ci" ]]; then
+    require_ci "$repo"
   fi
 
   local result rc=0
