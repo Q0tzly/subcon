@@ -28,3 +28,11 @@ remote ランナー（ssh 先で実行）の構想を、GitHub Actions の self-
 1. v1: subcon 自身のリポジトリで dogfooding（self-hosted 1 台、直接実行）
 2. テンプレート化と他リポジトリ対応（subcon の固定バージョン取得、container 併用）
 3. 複数マシン対応（ランナーラベルの選択と resume の追随）
+
+## v1 の契約（票19・20）
+
+- ワークフローは `.github/workflows/subcon-job.yml`。`workflow_dispatch` の入力は `job` / `ticket` / `base` / `model` / `timeout` の 5 つ。`run-name` は `subcon <job>` とし、`runs-on` は `[self-hosted, subcon]`（専用マシンに付けたラベル）
+- CI 側の実行は `ci/run-job.sh` が担う。環境変数 `SUBCON_CI_JOB` / `SUBCON_CI_TICKET` / `SUBCON_CI_BASE` / `SUBCON_CI_MODEL` / `SUBCON_CI_TIMEOUT` を受け、`lib/common.sh` の定数（スキーマ・前文・設定）を使う。作業場所は `${RUNNER_TEMP}/subcon-<job>/` で、中に `job/`（ticket.md、prompt.txt、work/ の clone）と `artifact/` を作る。`runners/local` をその job ディレクトリで実行し、成否によらず成果物をまとめる
+- artifact の中身（名前は `subcon-artifact` で固定）: `work.tar.gz`（`work/` をトップに含む tar）、`agy.json`（あれば）、`agy.stream`（あれば）
+- ホスト側の `runners/ci` は `gh` で dispatch し、`run-name` と開始時刻で run を特定して完了を待つ（ジョブの timeout ＋ 120 秒で打ち切り、`gh run cancel` を試みる）。完了したら結論によらず artifact をダウンロードし、`work.tar.gz` をジョブの `work/` に戻し、`agy.json` / `agy.stream` をジョブディレクトリに置く。終了コードは結論が success のとき 0、それ以外は 1
+- v1 では ci ジョブの resume は未対応（会話は CI マシン側にしか無く、ホスト側の前回パッチ引き継ぎとも噛み合わないため）。必要になったら段階 3 で扱う

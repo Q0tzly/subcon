@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats resume preflight authwarn container containerpre (all when none given).
+# Groups: ticket submit query manage history stats resume preflight authwarn container containerpre cijob (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1137,6 +1137,50 @@ test_container_clone_layout() {
   grep -q "git-layout: clone" "$(jget .patch)" || fail "patch does not show clone layout: $(cat "$(jget .patch)")"
 }
 
+# ---- cijob (19) --------------------------------------------------------------
+
+ci_fixture() {
+  local dest="$T/cirepo"
+  rm -rf "$dest"
+  mkdir -p "$dest/docs/t"
+  echo base > "$dest/README.md"
+  cp "$T/repo/docs/t/01-a.md" "$dest/docs/t/01-a.md" 2>/dev/null || printf '# a\n\n## Goal\ng\n\n## Files\n- README.md\n\n## Acceptance\n- `true`\n' > "$dest/docs/t/01-a.md"
+  git -C "$dest" init -q
+  git -C "$dest" config user.name t
+  git -C "$dest" config user.email t@example.invalid
+  git -C "$dest" add -A
+  git -C "$dest" commit -qm init
+  CI_BASE="$(git -C "$dest" rev-parse HEAD)"
+}
+
+test_cijob_ok() {
+  ci_fixture
+  RC=0
+  RUNNER_TEMP="$T/rt" GITHUB_WORKSPACE="$T/cirepo" \
+    SUBCON_CI_JOB=testjob1 SUBCON_CI_TICKET=docs/t/01-a.md SUBCON_CI_BASE="$CI_BASE" \
+    SUBCON_CI_MODEL=fake SUBCON_CI_TIMEOUT=5m \
+    bash "$ROOT/ci/run-job.sh" > "$T/out" 2> "$T/err" || RC=$?
+  assert_rc 0 || return 1
+  local art="$T/rt/subcon-testjob1/artifact"
+  [[ -f "$art/work.tar.gz" && -f "$art/agy.json" ]] || fail "artifact incomplete: $(ls "$art" 2>/dev/null)"
+  grep -q '"SUCCESS"' "$art/agy.json" || fail "agy.json has no SUCCESS: $(cat "$art/agy.json")"
+  mkdir -p "$T/unpacked" && tar -xzf "$art/work.tar.gz" -C "$T/unpacked"
+  grep -q "fake change" "$T/unpacked/work/README.md" || fail "work tar lacks the fake change"
+}
+
+test_cijob_fail_still_packages() {
+  ci_fixture
+  RC=0
+  RUNNER_TEMP="$T/rt" GITHUB_WORKSPACE="$T/cirepo" FAKE_AGY_MODE=fail \
+    SUBCON_CI_JOB=testjob2 SUBCON_CI_TICKET=docs/t/01-a.md SUBCON_CI_BASE="$CI_BASE" \
+    SUBCON_CI_MODEL=fake SUBCON_CI_TIMEOUT=5m \
+    bash "$ROOT/ci/run-job.sh" > "$T/out" 2> "$T/err" || RC=$?
+  [[ $RC -ne 0 ]] || fail "expected nonzero exit, got 0"
+  local art="$T/rt/subcon-testjob2/artifact"
+  [[ -f "$art/work.tar.gz" ]] || fail "work.tar.gz missing on failure"
+  [[ ! -f "$art/agy.json" ]] || fail "agy.json should not exist when agy produced no result"
+}
+
 # ---- containerpre (17) -----------------------------------------------------
 
 test_containerpre_engine_missing() {
@@ -1169,7 +1213,7 @@ test_containerpre_local_unaffected() {
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container containerpre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container containerpre cijob)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

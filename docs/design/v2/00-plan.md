@@ -21,6 +21,10 @@
 | 15 | agy の認証方式の検出と警告（消費者ログインなら `submit` / `resume` 前に警告、API キー方式なら無言） | Flash | `lib/common.sh` `lib/job.sh` |
 | 16 | container ランナー本体（設計は ../container-runner.md） | Flash | `runners/container` `runners/container-entry.sh` `container/Containerfile` |
 | 17 | container の事前確認（エンジンとイメージが無ければジョブを作らず終了コード 1） | Flash | `lib/common.sh` `lib/job.sh` |
+| 18 | container ジョブの作業コピーを worktree から clone に変える（コンテナ内 git 対応、イメージに safe.directory） | Flash | `lib/job.sh` `container/Containerfile` |
+| 19 | CI 側の実行スクリプトとワークフローテンプレート（設計は ../ci-runner.md） | Flash | `ci/run-job.sh` `.github/workflows/subcon-job.yml` |
+| 20 | CI ランナー本体（gh で dispatch・完了待ち・artifact の回収） | Flash | `runners/ci` |
+| 21 | CI の事前確認（gh と認証とワークフローファイルが無ければジョブを作らず終了コード 1） | Flash | `lib/common.sh` `lib/job.sh` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
