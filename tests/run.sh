@@ -1333,7 +1333,7 @@ test_driver_ci_guard() {
   make_driver_tree
   subx submit --runner ci --driver fakeok docs/t/01-a.md
   assert_rc 1 || return 1
-  grep -q "the ci runner supports the agy driver only" "$T/err" || fail "stderr: $(cat "$T/err")"
+  grep -q "the ci runner supports the agy and claude drivers only" "$T/err" || fail "stderr: $(cat "$T/err")"
   assert_eq "$(jobcount)" 0 jobs
 }
 
@@ -1692,6 +1692,60 @@ test_cijob_ok() {
   grep -q "fake change" "$T/unpacked/work/README.md" || fail "work tar lacks the fake change"
 }
 
+test_cijob_claude_ok() {
+  ci_fixture
+  local fc h
+  fc="$(fake_claude_path)"
+  h="$T/cihome"
+  mkdir -p "$h"
+  RC=0
+  HOME="$h" PATH="$fc:$PATH" RUNNER_TEMP="$T/rt" GITHUB_WORKSPACE="$T/cirepo" \
+    CLAUDE_CODE_OAUTH_TOKEN="dummy-token-38" \
+    SUBCON_CI_JOB=testjob3 SUBCON_CI_TICKET=docs/t/01-a.md SUBCON_CI_BASE="$CI_BASE" \
+    SUBCON_CI_MODEL=claude-haiku-5-5 SUBCON_CI_TIMEOUT=5m SUBCON_CI_DRIVER=claude \
+    bash "$ROOT/ci/run-job.sh" > "$T/out" 2> "$T/err" || RC=$?
+  assert_rc 0 || return 1
+  local art="$T/rt/subcon-testjob3/artifact"
+  [[ -f "$art/work.tar.gz" && -f "$art/agy.json" ]] || fail "artifact incomplete: $(ls "$art" 2>/dev/null)"
+  grep -q 'fake claude did it' "$art/agy.json" || fail "agy.json is not the claude driver's result: $(cat "$art/agy.json")"
+  mkdir -p "$T/unpacked3" && tar -xzf "$art/work.tar.gz" -C "$T/unpacked3"
+  grep -q "fake change" "$T/unpacked3/work/README.md" || fail "work tar lacks the fake change"
+}
+
+test_cijob_claude_env_file() {
+  ci_fixture
+  local fc h
+  fc="$(fake_claude_path)"
+  h="$T/cihome-file"
+  mkdir -p "$h/.config/subcon"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=dummy-from-file\n' > "$h/.config/subcon/claude-env"
+  RC=0
+  HOME="$h" PATH="$fc:$PATH" RUNNER_TEMP="$T/rt" GITHUB_WORKSPACE="$T/cirepo" \
+    SUBCON_CI_JOB=testjob4 SUBCON_CI_TICKET=docs/t/01-a.md SUBCON_CI_BASE="$CI_BASE" \
+    SUBCON_CI_MODEL=claude-haiku-5-5 SUBCON_CI_TIMEOUT=5m SUBCON_CI_DRIVER=claude \
+    bash "$ROOT/ci/run-job.sh" > "$T/out" 2> "$T/err" || RC=$?
+  assert_rc 0 || return 1
+  local art="$T/rt/subcon-testjob4/artifact"
+  [[ -f "$art/agy.json" ]] || fail "no agy.json artifact: $(ls "$art" 2>/dev/null)"
+  grep -q 'fake claude did it' "$art/agy.json" || fail "agy.json is not the claude driver's result: $(cat "$art/agy.json")"
+}
+
+test_cijob_claude_no_credentials() {
+  ci_fixture
+  local fc h
+  fc="$(fake_claude_path)"
+  h="$T/cihome-none"
+  mkdir -p "$h"
+  RC=0
+  HOME="$h" PATH="$fc:$PATH" RUNNER_TEMP="$T/rt" GITHUB_WORKSPACE="$T/cirepo" \
+    SUBCON_CI_JOB=testjob5 SUBCON_CI_TICKET=docs/t/01-a.md SUBCON_CI_BASE="$CI_BASE" \
+    SUBCON_CI_MODEL=claude-haiku-5-5 SUBCON_CI_TIMEOUT=5m SUBCON_CI_DRIVER=claude \
+    bash "$ROOT/ci/run-job.sh" > "$T/out" 2> "$T/err" || RC=$?
+  [[ $RC -eq 1 ]] || fail "expected exit 1, got $RC"
+  grep -q "claude-env" "$T/err" || fail "stderr lacks the env-file hint: $(cat "$T/err")"
+  [[ ! -f "$T/rt/subcon-testjob5/artifact/agy.json" ]] || fail "agy.json produced without credentials"
+}
+
 test_cijob_fail_still_packages() {
   ci_fixture
   RC=0
@@ -1720,6 +1774,20 @@ test_cirunner_ok() {
   mkdir -p "$T/repo/.github/workflows" && touch "$T/repo/.github/workflows/subcon-job.yml"
   PATH="$(gh_bin):$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
     sub run --runner ci docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .state)" finished state || return 1
+  assert_eq "$(jget .status)" done status || return 1
+  assert_eq "$(jget -r '.checks.files_changed | join(",")')" "README.md" files_changed || return 1
+  grep -q "fake change" "$(jget .patch)" || fail "patch lacks the fake change: $(cat "$(jget .patch)")"
+}
+
+test_cirunner_claude_ok() {
+  mkdir -p "$T/repo/.github/workflows" && touch "$T/repo/.github/workflows/subcon-job.yml"
+  local fc
+  fc="$(fake_claude_path)"
+  PATH="$(gh_bin):$fc:$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
+    CLAUDE_CODE_OAUTH_TOKEN="dummy-token-38" \
+    sub run --runner ci --driver claude docs/t/01-a.md
   assert_rc 0 || return 1
   assert_eq "$(jget .state)" finished state || return 1
   assert_eq "$(jget .status)" done status || return 1
