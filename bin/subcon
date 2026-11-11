@@ -22,6 +22,7 @@ usage: subcon new <feature>/<NN-name>
        subcon show <id>
        subcon list [--all]
        subcon diff <id>
+       subcon log <id>
        subcon apply <id>
        subcon commit -m <message> [--edited] <id>
        subcon reject -m <reason> [--model M] [--runner R] <id>
@@ -49,6 +50,7 @@ case "$cmd" in
   show) cmd_show "$@" ;;
   list) cmd_list "$@" ;;
   diff) cmd_diff "$@" ;;
+  log) cmd_log "$@" ;;
   apply) cmd_apply "$@" ;;
   commit) cmd_commit "$@" ;;
   reject) cmd_reject "$@" ;;

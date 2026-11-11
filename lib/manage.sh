@@ -98,6 +98,26 @@ cmd_diff() {
   cat "$patch"
 }
 
+cmd_log() {
+  [[ $# -eq 1 && -n "$1" ]] || die "job id required"
+
+  local id="$1"
+  local dir
+  dir="$(job_dir "$id")"
+  if [[ ! -d "$dir" ]]; then
+    echo "subcon: unknown job id: $id" >&2
+    return 1
+  fi
+
+  local log="$dir/log"
+  if [[ ! -f "$log" ]]; then
+    echo "subcon: no log for job: $id" >&2
+    return 1
+  fi
+
+  cat "$log"
+}
+
 cmd_apply() {
   [[ $# -eq 1 && -n "$1" ]] || die "job id required"
 
