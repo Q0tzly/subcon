@@ -24,13 +24,14 @@ subcon new feat/01-parser          # 票の雛形を作る
 subcon submit <ticket>...          # ジョブを発行（ID が返る）
 subcon wait --timeout 540 <id>...  # 結果 JSON を待つ
 subcon diff <id>                   # パッチを読む
+subcon log <id>                    # ジョブのログを見る
 subcon apply <id>                  # 作業ツリーに当てる
 subcon discard <id>                # ジョブを消す
 subcon guide                       # ルール（docs/delegation.md）を表示
 subcon trailer                     # コミット用の Co-Authored-By 行
 ```
 
-ほかに `run`（submit + wait）、`show`、`list`、`resume`（失敗したジョブを agy の会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
+ほかに `run`（submit + wait）、`show`、`list`、`commit`（`subcon commit`: 検収した変更を trailer 付きでコミットする）、`reject`（`subcon reject`: 理由を票に記録して差し戻し、再委任する）、`resume`（失敗したジョブを agy の会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
 
 ### container ランナー
 
@@ -42,6 +43,21 @@ subcon submit --runner container <ticket>...
 ```
 
 イメージはリポジトリのルートからビルドする。agy バイナリはイメージに同梱されず、ビルド時に公式インストーラから取得される。設計は [docs/design/container-runner.md](docs/design/container-runner.md)。
+
+### CI ランナー
+
+GitHub Actions の self-hosted ランナー上で票を実行するリモートランナー。実行と agy の認証は利用者自身のマシンに留まる。
+
+```sh
+subcon submit --runner ci <ticket>...
+```
+
+`.github/workflows/subcon-job.yml` を自分のリポジトリに置き、ラベル `subcon` の self-hosted ランナーを登録したうえで `subcon submit --runner ci <ticket>`。設計は [docs/design/ci-runner.md](docs/design/ci-runner.md)、仕様は [docs/spec/runner.md](docs/spec/runner.md)。
+
+実行ルートは以下の 2 段構えを想定している:
+
+- **self-hosted（自分のマシンで Actions を回す）**: 消費者サブスクリプションのログインで運用できる本命ルート。自分の CI／スクリプトから agy を呼ぶ形は、公式に意図された使い方とされている。
+- **GitHub ホスト型ランナー**: API キー方式が必須で、有料ティアが前提（無料枠は 5 リクエスト/分で、エージェント実行には不足する）。
 
 終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
 
