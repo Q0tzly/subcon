@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUBCON="$ROOT/bin/subcon"
 FAKEBIN="$(mktemp -d)"
 ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
+ln -s "$ROOT/drivers/agy" "$FAKEBIN/subcon-driver-agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
 unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING SUBCON_REVIEWER
