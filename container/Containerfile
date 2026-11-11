@@ -14,6 +14,7 @@ COPY runners/container-entry.sh /usr/local/bin/subcon-entry
 RUN chmod 755 /usr/local/bin/subcon-entry
 
 USER runner
+RUN git config --global --add safe.directory /work
 ENV PATH="/home/runner/.local/bin:${PATH}"
 
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash

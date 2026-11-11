@@ -155,7 +155,13 @@ job_create() {
   fi
 
   if [[ -z "$err_msg" ]]; then
-    git -C "$repo" worktree add --detach "$job_path/work" "$base" >/dev/null 2>&1 || err_msg="failed to create worktree"
+    if [[ "$runner" == "container" ]]; then
+      git clone -q "$repo" "$job_path/work" >/dev/null 2>&1 && \
+        git -C "$job_path/work" checkout -q "$base" >/dev/null 2>&1 || \
+        err_msg="failed to create worktree"
+    else
+      git -C "$repo" worktree add --detach "$job_path/work" "$base" >/dev/null 2>&1 || err_msg="failed to create worktree"
+    fi
   fi
 
   # Carry the interrupted run's work over, so the agent continues instead of redoing it.
