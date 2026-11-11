@@ -285,6 +285,16 @@ test_submit_ok() {
   assert_eq "$(git rev-parse HEAD)" "$head" "user HEAD"
 }
 
+test_submit_driver_meta() {
+  export FAKE_AGY_MODE=ok
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local d
+  d="$(jobdir "$ID")"
+  assert_eq "$(jq -r .driver "$d/meta.json")" agy meta.driver
+  assert_eq "$(result "$ID" .status)" done status
+}
+
 test_submit_runner_args() {
   export FAKE_AGY_LOG="$T/agy.log"
   submit_one --model gemini-3.8-flash-high --timeout 5m docs/t/01-a.md || return 1
@@ -1317,6 +1327,26 @@ engine_bin() {
   mkdir -p "$d"
   ln -sf "$ROOT/tests/fake-engine" "$d/docker"
   printf '%s' "$d"
+}
+
+test_container_entry_uses_driver() {
+  export FAKE_AGY_MODE=ok
+  local d="$T/entry-job" bin="$T/driverbin"
+  mkdir -p "$d/work" "$bin"
+  ln -s "$ROOT/drivers/agy" "$bin/subcon-driver-agy"
+  printf '# t\n\n## Files\n\n- README.md\n\n## Acceptance\n\n- [ ] true\n' > "$d/prompt.txt"
+  ( cd "$d/work" && \
+    SUBCON_JOB_DIR="$d" \
+    SUBCON_PROMPT_FILE="$d/prompt.txt" \
+    SUBCON_JOB_MODEL="gemini-3.8-flash-medium" \
+    SUBCON_TIMEOUT="30m" \
+    SUBCON_SCHEMA="$ROOT/schema/result.schema.json" \
+    SUBCON_SETTINGS='{}' \
+    PATH="$bin:$PATH" \
+    "$ROOT/runners/container-entry.sh" ) || fail "container entry failed"
+  [[ -s "$d/agy.json" ]] || fail "entry produced no agy.json"
+  assert_eq "$(jq -r .status "$d/agy.json")" SUCCESS entry.agy.status
+  grep -q 'fake change' "$d/work/README.md" || fail "driver did not run the backend in work"
 }
 
 test_container_run_ok() {

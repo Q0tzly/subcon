@@ -35,9 +35,9 @@
 | 30 | 仕様の追従（Argon レビュー残件: stats スキーマ・show の終了コード・委任上限・`## Files` の実仕様・ランナーの入出力と SIGTERM・env 棚卸し・プロンプト連結） | Flash | `docs/spec/cli.md` `docs/spec/files.md` `docs/spec/runner.md` `docs/spec/backend.md` |
 | 31 | `subcon log <id>` の新設（ジョブの `log` ファイルをそのまま出力。実行中でも読める） | Flash | `bin/subcon` `lib/manage.sh` |
 | 32 | README の公開最終形（CI ランナー節と実行ルート 2 段構えの明記、log / commit / reject の補完） | Flash | `README.md` |
-| 33 | ドライバ抽出（agy 起動ブロックを `drivers/agy` へ分離、振る舞い無変更。設計は ../driver-layer.md） | 未定 | `drivers/agy` `runners/local` `runners/container-entry.sh` `container/Containerfile` `lib/job.sh` |
-| 34 | ドライバ選択と事前確認の一般化（`--driver` / `SUBCON_DRIVER`、`preflight` / `models`、resume のドライバ固定。設計は ../driver-layer.md） | 未定 | `lib/common.sh` `lib/job.sh` `bin/subcon` `tests/` |
-| 35 | `drivers/claude` 本実装（claude -p の正規化、会話 ID の事前確定、フェイクでの検証。設計は ../driver-layer.md） | 未定 | `drivers/claude` `tests/` |
+| 33 | ドライバ抽出（agy 起動ブロックを `drivers/agy` へ分離、振る舞い無変更。設計は ../driver-layer.md） | Haiku（予備 Flash） | `drivers/agy` `runners/local` `runners/container-entry.sh` `container/Containerfile` `lib/job.sh` `lib/common.sh` |
+| 34 | ドライバ選択と事前確認の一般化（`--driver` / `SUBCON_DRIVER`、`preflight` / `models`、resume のドライバ固定。設計は ../driver-layer.md） | Haiku（予備 Flash） | `lib/common.sh` `lib/job.sh` `bin/subcon` `tests/` |
+| 35 | `drivers/claude` 本実装（claude -p の正規化、会話 ID の事前確定、フェイクでの検証。設計は ../driver-layer.md） | Haiku（予備 Flash） | `drivers/claude` `tests/` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
