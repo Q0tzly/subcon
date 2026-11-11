@@ -2,7 +2,9 @@
 
 remote ランナー（ssh 先で実行）の構想を、GitHub Actions の self-hosted ランナーで票を実行する形に置き換える設計。v1（票19〜21＋票22の tar 所有者修正）は実装済みで、全テスト 92 件通過（fake-gh による契約検証を含む）。
 
-実地確認（2026-11-11、Mac mini）: self-hosted ランナー（ラベル `subcon`）を登録・起動し、実ワークフローを 2 回実行した。dispatch → run-name 相関 → mini でのチェックアウトと `ci/run-job.sh` 実行 → artifact のアップロード／回収 → パッチ計算まで一貫して動作。ジョブ自体は mini 側の agy 未サインイン（`authentication required`）で失敗するのが現在の唯一の失敗点で、サインイン後に成功ジョブの確認が残る。1 回目の実行で、macOS 側 tarball の所有者（uid 501）をホストで復元できない問題が見つかり、票22で修正済み。
+実地確認（2026-11-11、Mac mini）: self-hosted ランナー（ラベル `subcon`）を登録・起動し、実ワークフローを複数回実行した。dispatch → run-name 相関 → mini でのチェックアウトと `ci/run-job.sh` 実行 → artifact のアップロード／回収 → パッチ計算まで一貫して動作。1 回目の実行で、macOS 側 tarball の所有者（uid 501）をホストで復元できない問題が見つかり、票22で修正済み。agy のサインイン後は実ジョブ（票03、gemini-3.8-flash-medium）が status done で完了し、agy.json のレポート回収まで確認した。
+
+前提（agy の認証）: macOS で対話ログインしたトークンはキーチェーンに入り、ランナー等の非対話文脈からは読めない。SSH 文脈でログインし直してファイル保存（`~/.gemini/antigravity-cli/antigravity-oauth-token`）に切り替える必要がある（agy は SSH セッションを検出するとファイル保存を使う）。
 
 ## なぜ CI か
 
