@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash runner
 
 COPY runners/container-entry.sh /usr/local/bin/subcon-entry
-RUN chmod +x /usr/local/bin/subcon-entry
+RUN chmod 755 /usr/local/bin/subcon-entry
 
 USER runner
 ENV PATH="/home/runner/.local/bin:${PATH}"
