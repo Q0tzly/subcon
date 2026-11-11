@@ -1,0 +1,49 @@
+name: subcon-job
+run-name: subcon ${{ inputs.job }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Job ID'
+        required: true
+        type: string
+      ticket:
+        description: 'Ticket relative path'
+        required: true
+        type: string
+      base:
+        description: 'Base commit'
+        required: true
+        type: string
+      model:
+        description: 'Model'
+        required: true
+        type: string
+      timeout:
+        description: 'Timeout'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  subcon:
+    runs-on: [self-hosted, subcon]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base }}
+      - env:
+          SUBCON_CI_JOB: ${{ inputs.job }}
+          SUBCON_CI_TICKET: ${{ inputs.ticket }}
+          SUBCON_CI_BASE: ${{ inputs.base }}
+          SUBCON_CI_MODEL: ${{ inputs.model }}
+          SUBCON_CI_TIMEOUT: ${{ inputs.timeout }}
+        run: bash ci/run-job.sh
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subcon-artifact
+          path: ${{ runner.temp }}/subcon-${{ inputs.job }}/artifact
