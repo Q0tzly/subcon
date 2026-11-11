@@ -1328,6 +1328,90 @@ test_driver_container_guard() {
   assert_eq "$(jobcount)" 0 jobs
 }
 
+fake_claude_path() {
+  local bin="$T/fcbin"
+  mkdir -p "$bin"
+  ln -s "$ROOT/tests/fake-claude" "$bin/claude"
+  echo "$bin"
+}
+
+test_driver_claude_fake_ok() {
+  make_driver_tree
+  local fc
+  fc="$(fake_claude_path)"
+  PATH="$fc:$PATH" subx submit --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  local d
+  d="$(jobdir "$ID")"
+  assert_eq "$(jq -r .driver "$d/meta.json")" claude meta.driver
+  assert_eq "$(jq -r .model "$d/meta.json")" claude-haiku-5-5 meta.model
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .report.summary)" "fake claude did it" report.summary
+  assert_eq "$(jq -r .usage.cache_read_tokens "$d/agy.json")" 30 agy.usage.cache_read
+  assert_eq "$(jq -r .usage.total_tokens "$d/agy.json")" 30 agy.usage.total
+  assert_eq "$(jq -r .cost_usd "$d/agy.json")" 0.01 agy.cost_usd
+  local conv
+  conv="$(jq -r .conversation_id "$d/agy.json")"
+  [[ -n "$conv" && "$conv" != null ]] || fail "agy.json has no conversation_id"
+  assert_eq "$(head -n 1 "$d/agy.stream" | jq -r .event)" init stream.first.event
+  assert_eq "$(head -n 1 "$d/agy.stream" | jq -r .conversation_id)" "$conv" stream.init.conversation
+}
+
+test_driver_claude_resume() {
+  make_driver_tree
+  local fc
+  fc="$(fake_claude_path)"
+  export FAKE_CLAUDE_MODE=error
+  PATH="$fc:$PATH" subx submit --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  local conv
+  conv="$(result "$ID" .conversation)"
+  [[ -n "$conv" && "$conv" != null ]] || fail "failed job recorded no conversation"
+  export FAKE_CLAUDE_MODE=ok
+  PATH="$fc:$PATH" subx resume "$ID"
+  assert_rc 0 || return 1
+  local new
+  new="$(jget '.[0].id')"
+  wait_done "$new" || return 1
+  assert_eq "$(jq -r .driver "$(jobdir "$new")/meta.json")" claude resumed.meta.driver
+  assert_eq "$(result "$new" .status)" done resumed.status
+  assert_eq "$(result "$new" .conversation)" "$conv" resumed.conversation
+}
+
+test_driver_claude_nojson() {
+  make_driver_tree
+  local fc
+  fc="$(fake_claude_path)"
+  export FAKE_CLAUDE_MODE=nojson
+  PATH="$fc:$PATH" subx submit --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  local d
+  d="$(jobdir "$ID")"
+  assert_eq "$(jq -r .status "$d/agy.json")" ERROR agy.status
+  local conv
+  conv="$(head -n 1 "$d/agy.stream" | jq -r .conversation_id)"
+  [[ -n "$conv" && "$conv" != null ]] || fail "stream init has no conversation_id"
+  assert_eq "$(jq -r .conversation_id "$d/agy.json")" "$conv" agy.conversation
+  assert_eq "$(result "$ID" .conversation)" "$conv" result.conversation
+}
+
+test_driver_claude_preflight_missing() {
+  make_driver_tree
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" subx submit --driver claude docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "claude not found" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
 # ---- preflight (14) --------------------------------------------------------
 
 test_preflight_missing_submit() {
