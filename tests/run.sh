@@ -1134,7 +1134,7 @@ test_container_clone_layout() {
     sub run --runner container docs/t/01-a.md
   assert_rc 0 || return 1
   assert_eq "$(jget .state)" finished state || return 1
-  assert_contains "$(cat "$(jget .patch)")" "git-layout: clone" patch
+  grep -q "git-layout: clone" "$(jget .patch)" || fail "patch does not show clone layout: $(cat "$(jget .patch)")"
 }
 
 # ---- containerpre (17) -----------------------------------------------------
