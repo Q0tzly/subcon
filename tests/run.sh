@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
+# Groups: ticket submit query manage commit reject formats history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1555,10 +1555,58 @@ test_containerpre_local_unaffected() {
   assert_eq "$(jobcount)" 1 jobs
 }
 
+# ---- formats (25) ----------------------------------------------------------
+
+test_formats_meta_v() {
+  submit_one docs/t/01-a.md || return 1
+  assert_eq "$(jq -r .v "$(jobdir "$ID")/meta.json")" 1 meta.v
+}
+
+test_formats_result_v() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .v)" 1 result.v
+  assert_eq "$(jq -r .v "$(jobdir "$ID")/result.json")" 1 result_file.v
+}
+
+test_formats_running_result_v() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=6
+  submit_one docs/t/01-a.md || return 1
+  sub show "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .v)" 1 running.v
+  assert_match "$(jget .state)" '^(queued|running)$' running.state
+  wait_done "$ID" || return 1
+}
+
+test_formats_history_v() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  assert_eq "$(jq -r --arg id "$ID" 'select(.type == "job" and .id == $id) | .v' "$(hist)")" 1 history_job.v
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r --arg id "$ID" 'select(.type == "event" and .id == $id) | .v' "$(hist)")" 1 history_event.v
+}
+
+test_formats_legacy_without_v() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local d
+  d="$(jobdir "$ID")"
+  jq 'del(.v)' "$d/meta.json" > "$T/meta.tmp" && mv "$T/meta.tmp" "$d/meta.json"
+  jq 'del(.v)' "$d/result.json" > "$T/result.tmp" && mv "$T/result.tmp" "$d/result.json"
+  jq -c 'del(.v)' "$(hist)" > "$T/hist.tmp" && mv "$T/hist.tmp" "$(hist)"
+  sub show "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .id)" "$ID" legacy.show_id
+  sub stats > /dev/null
+  assert_rc 0 || return 1
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject history stats resume preflight authwarn container containerpre cijob cirunner cipre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats history stats resume preflight authwarn container containerpre cijob cirunner cipre)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

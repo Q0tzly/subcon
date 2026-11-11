@@ -27,6 +27,7 @@
 | 21 | CI の事前確認（gh と認証とワークフローファイルが無ければジョブを作らず終了コード 1） | Flash | `lib/common.sh` `lib/job.sh` |
 | 23 | `subcon commit`（trailer の自動付与。レビュアー名義は `SUBCON_REVIEWER` に設定） | Flash | `bin/subcon` `lib/manage.sh` `docs/design/v2.md` `docs/delegation.md` |
 | 24 | `subcon reject`（差し戻し。Notes 追記＋票コミット＋再 submit、再委任 2 回までを強制） | Flash | `bin/subcon` `lib/manage.sh` `docs/design/v2.md` `docs/delegation.md` |
+| 25 | ファイル形式の版付け（`v: 1`）と history 行種別の `.type` 統一 | Flash | `lib/job.sh` `lib/history.sh` `lib/manage.sh` `docs/design/v2.md` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
