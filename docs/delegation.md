@@ -13,7 +13,7 @@ subcon wait --timeout 540 <id> <id>             # 終了コード 5 なら繰り
 subcon diff <id>                                # 全部読む
 subcon apply <id>                               # 作業ツリーに当てる（コミットはしない）
 <Acceptance のコマンドを自分で実行>
-git commit                                      # trailer は下記。`subcon trailer` が実装者の行を出す
+subcon commit -m "feat: ..." <id>               # trailer を自動付与（要 SUBCON_REVIEWER。修正時は --edited）
 subcon discard <id>
 ```
 
@@ -137,7 +137,23 @@ agy にはサンドボックス外実行（`BypassSandbox`）を CLI から禁�
 
 検収を通ったものだけを上位がコミットする。Flash にはコミットさせない（未検収のものが履歴に入るため）。
 
-trailer で実装者とレビュアーを分ける。実装者の行は `subcon trailer` が出す。
+上位のレビュアー名義をあらかじめ環境変数 `SUBCON_REVIEWER` に設定しておく。
+
+```sh
+export SUBCON_REVIEWER='Name <email>'
+```
+
+検収が通ったら、`subcon commit` でコミットする:
+
+```sh
+subcon commit -m <message> [--edited] <id>
+```
+
+- trailer（`Co-Authored-By` 実装者／`Reviewed-By` レビュアー）が自動で付く
+- 検収後に上位が手を入れた場合は `--edited` を付けると、レビュアーの `Co-Authored-By` も追加される
+- ジョブの範囲外の変更や未追跡ファイルはコミットに巻き込まれない（`checks.files_changed` のファイルのみステージされる）
+
+手動でコミットする場合の trailer 形式は従来通り:
 
 ```
 Co-Authored-By: Gemini 3.8 Flash <noreply@google.com>
@@ -145,6 +161,7 @@ Reviewed-By: <上位エージェントのモデル名> <そのアドレス>
 ```
 
 - 上位が検収後に手を入れたら、上位も `Co-Authored-By` に加える
+- 実装者の行は `subcon trailer` が出す
 - Gemini のアドレスは公式の noreply が確認できなかったので `noreply@google.com` に決め打ち（`SUBCON_COAUTHOR_EMAIL` で変更可）
 
 ## プロジェクト側の規約

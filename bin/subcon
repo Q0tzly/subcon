@@ -23,6 +23,7 @@ usage: subcon new <feature>/<NN-name>
        subcon list [--all]
        subcon diff <id>
        subcon apply <id>
+       subcon commit -m <message> [--edited] <id>
        subcon discard <id>...
        subcon stats [--all] [--since <N>d|<N>h] [--text]
        subcon guide
@@ -48,6 +49,7 @@ case "$cmd" in
   list) cmd_list "$@" ;;
   diff) cmd_diff "$@" ;;
   apply) cmd_apply "$@" ;;
+  commit) cmd_commit "$@" ;;
   discard) cmd_discard "$@" ;;
   stats) cmd_stats "$@" ;;
   trailer) cmd_trailer "$@" ;;
