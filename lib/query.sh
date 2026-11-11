@@ -180,7 +180,7 @@ cmd_run() {
   local pass_args=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --runner|--model|--timeout)
+      --runner|--model|--driver|--timeout)
         [[ $# -ge 2 ]] || die "$1 requires a value"
         pass_args+=("$1" "$2")
         shift 2

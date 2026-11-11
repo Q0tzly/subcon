@@ -1,11 +1,9 @@
 # Job creation, background execution and finalization (ticket 04).
 
 cmd_submit() {
-  require_agy
-  warn_consumer_auth
   local runner="local"
-  local model
-  model="$(default_model)"
+  local driver="${SUBCON_DRIVER:-agy}"
+  local model=""
   local timeout="$SUBCON_DEFAULT_TIMEOUT"
   local tickets=()
 
@@ -19,6 +17,11 @@ cmd_submit() {
       --model)
         [[ $# -ge 2 ]] || die "--model requires a value"
         model="$2"
+        shift 2
+        ;;
+      --driver)
+        [[ $# -ge 2 ]] || die "--driver requires a value"
+        driver="$2"
         shift 2
         ;;
       --timeout)
@@ -37,8 +40,17 @@ cmd_submit() {
   done
 
   # Validate options
+  require_driver "$driver"
+  if [[ "$driver" == agy ]]; then
+    warn_consumer_auth
+  fi
+  [[ -n "$model" ]] || model="$(default_model "$driver")"
   [[ -f "$SUBCON_ROOT/runners/$runner" && -x "$SUBCON_ROOT/runners/$runner" ]] || die "runner not found: $runner"
   [[ ${#tickets[@]} -gt 0 ]] || die "at least one ticket required"
+
+  if [[ "$runner" == "container" || "$runner" == "ci" ]] && [[ "$driver" != agy ]]; then
+    die "the $runner runner supports the agy driver only"
+  fi
 
   if [[ "$runner" == "container" ]]; then
     require_container
@@ -70,7 +82,7 @@ cmd_submit() {
 
   # Step 3: For each ticket, create the job and launch its runner in the background.
   for t in "${tickets[@]}"; do
-    if job_create "$repo" "$t" "$base" "$runner" "$model" "$timeout"; then
+    if job_create "$repo" "$t" "$base" "$runner" "$model" "$timeout" "" "$driver"; then
       submit_results+=("$(json_out '{ticket: $t, id: $id, error: null}' --arg t "$t" --arg id "$JOB_ID")")
     else
       submit_results+=("$(json_out '{ticket: $t, id: null, error: $err}' --arg t "$t" --arg err "$JOB_ERR")")
@@ -87,13 +99,14 @@ cmd_submit() {
   return 0
 }
 
-# job_create <repo> <ticket> <base> <runner> <model> <timeout> [<from-job-dir>]
+# job_create <repo> <ticket> <base> <runner> <model> <timeout> <from-job-dir> <driver>
 # Creates a job directory with its worktree and starts the runner in the background.
 # Sets JOB_ID on success and JOB_ERR on failure (nothing is left behind on failure).
 # With <from-job-dir> (resume), the ticket and the carried-over patch come from that
 # job instead of HEAD, and meta.json records resume_of and the conversation to continue.
+# An empty <driver> means agy (jobs created before drivers existed).
 job_create() {
-  local repo="$1" rel_ticket="$2" base="$3" runner="$4" model="$5" timeout="$6" from_dir="${7:-}"
+  local repo="$1" rel_ticket="$2" base="$3" runner="$4" model="$5" timeout="$6" from_dir="${7:-}" driver="${8:-agy}"
   JOB_ID="" JOB_ERR=""
 
   local ticket_base
@@ -138,7 +151,7 @@ job_create() {
     --arg ticket "$rel_ticket" \
     --arg base "$base" \
     --arg runner "$runner" \
-    --arg driver agy \
+    --arg driver "$driver" \
     --arg model "$model" \
     --arg timeout "$timeout" \
     --arg created_at "$created_at" \
@@ -200,8 +213,6 @@ job_create() {
 }
 
 cmd_resume() {
-  require_agy
-  warn_consumer_auth
   local timeout="" id=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -223,6 +234,13 @@ cmd_resume() {
   local dir
   dir="$(job_dir "$id")"
   [[ -d "$dir" ]] || die "unknown job id: $id"
+
+  local driver
+  driver="$(jq -r '.driver // "agy"' "$dir/meta.json")"
+  require_driver "$driver"
+  if [[ "$driver" == agy ]]; then
+    warn_consumer_auth
+  fi
 
   local repo
   repo="$(repo_top)"
@@ -248,7 +266,7 @@ cmd_resume() {
   fi
 
   local result rc=0
-  if job_create "$repo" "$ticket" "$base" "$runner" "$model" "$timeout" "$dir"; then
+  if job_create "$repo" "$ticket" "$base" "$runner" "$model" "$timeout" "$dir" "$driver"; then
     result="$(json_out '{ticket: $t, id: $id, resume_of: $of, error: null}' --arg t "$ticket" --arg id "$JOB_ID" --arg of "$id")"
   else
     result="$(json_out '{ticket: $t, id: null, resume_of: $of, error: $err}' --arg t "$ticket" --arg err "$JOB_ERR" --arg of "$id")"

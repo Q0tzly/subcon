@@ -242,7 +242,9 @@ cmd_commit() {
   fi
 
   # Step 4: Early checks before any side effects
-  require_agy
+  local driver
+  driver="$(jq -r '.driver // "agy"' "$dir/meta.json" 2>/dev/null || echo agy)"
+  require_driver "$driver"
 
   # Guard: double commit check
   local hfile
@@ -300,8 +302,8 @@ cmd_commit() {
   local model
   model="$(jq -r .model "$dir/meta.json" 2>/dev/null || echo "")"
   local implementer
-  implementer="$(model_name "$model")"
-  [[ -n "$implementer" ]] || die "unknown model: $model (see: agy models)"
+  implementer="$(model_name "$model" "$driver")"
+  [[ -n "$implementer" ]] || die "unknown model: $model (see: $driver models)"
 
   # Step 6: Stage only checks.files_changed via git -C <repo> add -A -- <paths...>
   local files=()
@@ -424,14 +426,16 @@ cmd_reject() {
   fi
 
   # Step 4: Pre-flight checks before any side effects
-  require_agy
-
-  local orig_runner orig_model
+  local orig_runner orig_model orig_driver
   orig_runner="$(jq -r .runner "$dir/meta.json" 2>/dev/null || echo "")"
   orig_model="$(jq -r .model "$dir/meta.json" 2>/dev/null || echo "")"
+  orig_driver="$(jq -r '.driver // "agy"' "$dir/meta.json" 2>/dev/null || echo agy)"
 
   local effective_runner="${runner:-$orig_runner}"
   local effective_model="${model:-$orig_model}"
+  local effective_driver="$orig_driver"
+
+  require_driver "$effective_driver"
 
   [[ -f "$SUBCON_ROOT/runners/$effective_runner" && -x "$SUBCON_ROOT/runners/$effective_runner" ]] || die "runner not found: $effective_runner"
   if [[ "$effective_runner" == "container" ]]; then
@@ -533,7 +537,7 @@ cmd_reject() {
 
   # Step 10: Launch new job with cmd_submit
   local submit_out submit_rc=0
-  submit_out="$(cmd_submit --runner "$effective_runner" --model "$effective_model" "$ticket")" || submit_rc=$?
+  submit_out="$(cmd_submit --runner "$effective_runner" --model "$effective_model" --driver "$effective_driver" "$ticket")" || submit_rc=$?
 
   local new_id=""
   if [[ $submit_rc -eq 0 && -n "$submit_out" ]]; then

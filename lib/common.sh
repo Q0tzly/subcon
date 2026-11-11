@@ -1,26 +1,10 @@
 # Shared helpers, sourced by bin/subcon. Expects SUBCON_ROOT to be set.
 
-SUBCON_DEFAULT_MODEL=gemini-3.8-flash-medium
 SUBCON_DEFAULT_TIMEOUT=30m
 SUBCON_COAUTHOR_EMAIL="${SUBCON_COAUTHOR_EMAIL:-noreply@google.com}"
 SUBCON_SCHEMA="$SUBCON_ROOT/schema/result.schema.json"
 SUBCON_PROMPT_PREAMBLE="$SUBCON_ROOT/lib/prompt.md"
 SUBCON_RESUME_PROMPT="$SUBCON_ROOT/lib/resume-prompt.md"
-
-# Headless agy auto-denies anything not allowed, which aborts the whole run,
-# so allow every command and deny the ones that change git state or reach out.
-# Rules match whole words as a prefix: command(git commit) covers "git commit -m x".
-# agy has no CLI setting to forbid BypassSandbox, and command(*) also approves
-# unsandboxed runs; the deny list applies to those too.
-SUBCON_SETTINGS='{"permissions":{
-  "allow":["command(*)"],
-  "deny":[
-    "command(git commit)","command(git add)","command(git reset)","command(git checkout)",
-    "command(git switch)","command(git restore)","command(git stash)","command(git rebase)",
-    "command(git merge)","command(git push)","command(git clean)","command(git branch)",
-    "command(git tag)","command(git rm)","command(git mv)","command(gh)","command(sudo)",
-    "command(rm -rf)","command(rm -fr)"
-  ]}}'
 
 die() { echo "subcon: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }
@@ -44,27 +28,29 @@ job_dir() { echo "$(jobs_dir)/$1"; }
 
 repo_top() { git rev-parse --show-toplevel 2>/dev/null || die "not inside a git repository"; }
 
-default_model() { echo "${SUBCON_MODEL:-$SUBCON_DEFAULT_MODEL}"; }
-
-agy_bin() {
-  local bin
-  if bin="$(command -v agy 2>/dev/null)" && [[ -n "$bin" ]]; then
-    echo "$bin"
-    return 0
-  fi
-  if [[ -n "${HOME:-}" && -x "$HOME/.local/bin/agy" ]]; then
-    echo "$HOME/.local/bin/agy"
-    return 0
-  fi
-  return 1
+# driver_path <name>: the executable drivers/<name>, or return 1.
+# Names come from the command line, so anything that is not a plain word is refused.
+driver_path() {
+  local name="$1"
+  [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+  local bin="$SUBCON_ROOT/drivers/$name"
+  [[ -x "$bin" ]] || return 1
+  echo "$bin"
 }
 
-require_agy() {
-  local bin
-  bin="$(agy_bin)" || die "agy not found: install agy and make sure it is on PATH or at ~/.local/bin/agy"
-  if ! command -v agy >/dev/null 2>&1; then
-    export PATH="$HOME/.local/bin${PATH:+:$PATH}"
+require_driver() {
+  local name="$1" bin
+  bin="$(driver_path "$name")" || die "unknown driver: $name"
+  "$bin" preflight || die "driver preflight failed: $name"
+}
+
+# default_model <driver>: SUBCON_MODEL if set, else the driver's default.
+default_model() {
+  if [[ -n "${SUBCON_MODEL:-}" ]]; then
+    echo "$SUBCON_MODEL"
+    return 0
   fi
+  "$(driver_path "$1")" default-model
 }
 
 container_engine() {
@@ -122,17 +108,15 @@ warn_consumer_auth() {
   return 0
 }
 
-# "Gemini 3.8 Flash (Medium)" -> "Gemini 3.8 Flash"
+# model_name <model> <driver>: "Gemini 3.8 Flash (Medium)" -> "Gemini 3.8 Flash"
 model_name() {
   local bin
-  bin="$(agy_bin)" || return 1
+  bin="$(driver_path "$2")" || return 1
   "$bin" models 2>/dev/null | awk -F'\t' -v id="$1" '$1 == id { sub(/ \([^)]*\)$/, "", $2); print $2 }'
 }
 
 cmd_trailer() {
-  require_agy
-  local model
-  model="$(default_model)"
+  local driver="${SUBCON_DRIVER:-agy}" model=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --model)
@@ -140,13 +124,20 @@ cmd_trailer() {
         model="$2"
         shift 2
         ;;
+      --driver)
+        [[ $# -ge 2 ]] || die "--driver requires a value"
+        driver="$2"
+        shift 2
+        ;;
       *)
         die "unknown option: $1"
         ;;
     esac
   done
+  require_driver "$driver"
+  [[ -n "$model" ]] || model="$(default_model "$driver")"
   local name
-  name="$(model_name "$model")"
-  [[ -n "$name" ]] || die "unknown model: $model (see: agy models)"
+  name="$(model_name "$model" "$driver")"
+  [[ -n "$name" ]] || die "unknown model: $model (see: $driver models)"
   echo "Co-Authored-By: $name <$SUBCON_COAUTHOR_EMAIL>"
 }

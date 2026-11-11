@@ -15,9 +15,9 @@ done
 usage() {
   cat >&2 <<USAGE
 usage: subcon new <feature>/<NN-name>
-       subcon submit [--runner R] [--model M] [--timeout T] <ticket>...
+       subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...
        subcon wait [--timeout SEC] <id>...
-       subcon run [--runner R] [--model M] [--timeout T] <ticket>
+       subcon run [--runner R] [--model M] [--driver D] [--timeout T] <ticket>
        subcon resume [--timeout T] <id>
        subcon show <id>
        subcon list [--all]

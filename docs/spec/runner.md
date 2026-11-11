@@ -45,7 +45,6 @@
 | --- | --- | --- |
 | `SUBCON_PROMPT_FILE` | subcon 本体 | agy に渡すプロンプトファイルの絶対パス（前文と票、または resume プロンプトが書き込まれている） |
 | `SUBCON_SCHEMA` | subcon 本体 | バックエンドの報告フォーマットを強制する JSON スキーマファイルのパス（`schema/result.schema.json`） |
-| `SUBCON_SETTINGS` | subcon 本体 | agy のツール権限制御設定 JSON 文字列（git 破壊的操作の拒否リストなど） |
 | `SUBCON_JOB_MODEL` | subcon 本体 | ジョブで実行する agy のモデル ID（例: `gemini-3.8-flash-medium`） |
 | `SUBCON_TIMEOUT` | subcon 本体 | agy の `--print-timeout` に指定するタイムアウト文字列（例: `30m`） |
 | `SUBCON_CONVERSATION` | subcon 本体 | 再開（`resume`）時に引き継ぐ agy の会話 ID（初回実行時は未設定） |
