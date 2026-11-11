@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject formats runnerenv history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
+# Groups: ticket submit query manage commit reject formats runnerenv entry guard history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1631,10 +1631,150 @@ test_runnerenv_user_knob() {
   assert_eq "$(jq -r .model "$(jobdir "$ID")/meta.json")" knob-model meta.model
 }
 
+# ---- entry (28) ------------------------------------------------------------
+
+test_entry_run_two_tickets() {
+  write_ticket docs/t/02-b.md README.md
+  commit_all second
+  sub run docs/t/01-a.md docs/t/02-b.md
+  assert_rc 1 || return 1
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_entry_resume_ci_refused() {
+  mkdir -p "$T/repo/.github/workflows" && touch "$T/repo/.github/workflows/subcon-job.yml"
+  PATH="$(gh_bin):$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
+    sub submit --runner ci docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  sub resume "$ID"
+  assert_rc 1 || return 1
+  grep -q "resume is not supported for the ci runner" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 1 jobs
+}
+
+test_entry_trailer_unknown_option() {
+  sub trailer --foo
+  assert_rc 1 || return 1
+  grep -q "unknown option" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
+test_entry_trailer_model_needs_value() {
+  sub trailer --model
+  assert_rc 1 || return 1
+  grep -q -- "--model requires a value" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
+test_entry_trailer_ok() {
+  sub trailer --model gemini-3.8-flash-medium
+  assert_rc 0 || return 1
+  grep -q "Co-Authored-By: Gemini 3.8 Flash" <<<"$OUT" || fail "stdout: $OUT"
+}
+
+# ---- guard (29) --------------------------------------------------------------
+
+test_guard_commit_not_applied() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  echo "unrelated edit" >> README.md
+  local before
+  before="$(git rev-parse HEAD)"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: x" "$ID"
+  assert_rc 1 || return 1
+  grep -q "not applied" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+  grep -q "unrelated edit" README.md || fail "working tree edit lost"
+}
+
+test_guard_commit_edited_allows() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  echo "supervisor fix" >> README.md
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: x" --edited "$ID"
+  assert_rc 0 || return 1
+}
+
+test_guard_commit_twice() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: x" "$ID"
+  assert_rc 0 || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  echo "another edit" >> README.md
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: y" "$ID"
+  assert_rc 1 || return 1
+  grep -q "already committed" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+}
+
+test_guard_commit_agy_missing_clean_index() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: x" "$ID"
+  assert_rc 1 || return 1
+  git diff --cached --quiet || fail "index was staged before the failure"
+}
+
+test_guard_reject_bad_runner_no_side_effects() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  sub reject -m "bad runner" --runner no-such-runner "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+  assert_eq "$(git status --porcelain -- docs/t/01-a.md)" "" ticket_untouched
+  grep -q '"event":"rejected"' "$(hist)" && fail "rejected event recorded"
+  return 0
+}
+
+test_guard_reject_agy_missing_no_side_effects() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local before cp h
+  before="$(git rev-parse HEAD)"
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" sub reject -m "no agy" "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+  assert_eq "$(git status --porcelain -- docs/t/01-a.md)" "" ticket_untouched
+}
+
+test_guard_reject_cap_ignores_resume() {
+  mkdir -p "$SUBCON_STATE"
+  local i
+  for i in 1 2; do
+    jq -cn --arg repo "$TOP" --arg ticket "docs/t/01-a.md" --arg id "seed$i" '
+      {type: "job", v: 1, id: $id, repo: $repo, ticket: $ticket,
+       model: "m", runner: "local", created_at: "2026-01-01T00:00:00Z",
+       finished_at: "2026-01-01T00:01:00Z", duration_s: 1, state: "finished",
+       status: "done", checks_ok: true, files_changed: 1, insertions: 1,
+       deletions: 0, tokens: null, resume_of: "seed-parent"}
+    ' >> "$(hist)"
+  done
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub reject -m "cap check" "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jobcount)" 2 jobs
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv history stats resume preflight authwarn container containerpre cijob cirunner cipre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard history stats resume preflight authwarn container containerpre cijob cirunner cipre)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
