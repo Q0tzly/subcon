@@ -16,8 +16,12 @@ RUN chmod 755 /usr/local/bin/subcon-entry
 COPY drivers/agy /usr/local/bin/subcon-driver-agy
 RUN chmod 755 /usr/local/bin/subcon-driver-agy
 
+COPY drivers/claude /usr/local/bin/subcon-driver-claude
+RUN chmod 755 /usr/local/bin/subcon-driver-claude
+
 USER runner
 RUN git config --global --add safe.directory /work
 ENV PATH="/home/runner/.local/bin:${PATH}"
 
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
+RUN curl -fsSL https://claude.ai/install.sh | bash

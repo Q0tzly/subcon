@@ -48,11 +48,18 @@ cmd_submit() {
   [[ -f "$SUBCON_ROOT/runners/$runner" && -x "$SUBCON_ROOT/runners/$runner" ]] || die "runner not found: $runner"
   [[ ${#tickets[@]} -gt 0 ]] || die "at least one ticket required"
 
-  if [[ "$runner" == "container" || "$runner" == "ci" ]] && [[ "$driver" != agy ]]; then
-    die "the $runner runner supports the agy driver only"
+  if [[ "$runner" == "ci" ]] && [[ "$driver" != agy ]]; then
+    die "the ci runner supports the agy driver only"
   fi
 
   if [[ "$runner" == "container" ]]; then
+    case "$driver" in
+      agy) ;;
+      claude)
+        [[ -n "${ANTHROPIC_API_KEY:-}" ]] || die "the container runner with the claude driver requires ANTHROPIC_API_KEY"
+        ;;
+      *) die "the container runner supports the agy and claude drivers only" ;;
+    esac
     require_container
   fi
 
@@ -262,6 +269,9 @@ cmd_resume() {
   [[ -n "$timeout" ]] || timeout="$(jq -r .timeout "$dir/meta.json")"
 
   if [[ "$runner" == "container" ]]; then
+    if [[ "$driver" == claude ]]; then
+      [[ -n "${ANTHROPIC_API_KEY:-}" ]] || die "the container runner with the claude driver requires ANTHROPIC_API_KEY"
+    fi
     require_container
   fi
 

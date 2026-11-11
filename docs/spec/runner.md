@@ -77,18 +77,22 @@
 
 ### container ランナー (`runners/container`)
 
-Docker または Podman を用いて使い捨てコンテナ内で agy を実行する隔離ランナー。
+Docker または Podman を用いて使い捨てコンテナ内でドライバ（`agy` / `claude`）を実行する隔離ランナー。
 
 - **マウント構成**:
   - `$job_dir/work` → `/work`（rw、作業ディレクトリ）
   - `$job_dir` → `/job`（rw、ログ出力およびスキーマ配置）
-  - `$HOME/.gemini` → `/home/runner/.gemini`（rw、認証情報および会話 DB）
+  - `$HOME/.gemini` → `/home/runner/.gemini`（rw、認証情報および会話 DB。`driver=agy` のとき）
+  - `$HOME/.claude` → `/home/runner/.claude`（rw、会話ファイルの永続化用。`driver=claude` のとき。認証は `ANTHROPIC_API_KEY` 環境変数で行う）
 - **環境変数の変換**:
   - コンテナ内のパスに合わせてパス変数を変換して渡す（`SUBCON_PROMPT_FILE=/job/prompt.txt`, `SUBCON_SCHEMA=/job/schema.json`）。
+  - `SUBCON_DRIVER` をコンテナへ渡し、entry が `subcon-driver-<name>` を解決する。
+  - `ANTHROPIC_API_KEY` はホスト側に設定されている場合のみ名前だけを渡す（値は引数に埋めない）。
   - ホスト側の uid:gid（`--user "$(id -u):$(id -g)"`）でコンテナを実行し、ホストとコンテナの間でファイルの所有者不整合が起きないようにする。
 - **イメージ作成の要点**:
   - `container/Containerfile` からビルドする。
   - agy バイナリはイメージに同梱せず、ビルド時に公式インストーラ（`https://antigravity.google/cli/install.sh`）経由で取得する（再配布禁止規約に準拠）。
+  - claude バイナリもイメージに同梱せず、公式インストーラ（`https://claude.ai/install.sh`）経由で取得する。`drivers/claude` は `subcon-driver-claude` として同梱する。
   - Debian bookworm（glibc 2.28 以上）をベースとし、git, jq, curl を含む。
   - コンテナ内 git の誤動作防止のため、コンテナ側の git 設定で `safe.directory`（`/work`）を設定する。
 

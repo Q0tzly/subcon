@@ -30,8 +30,15 @@ trap cleanup EXIT
 trap 'exit 143' INT TERM HUP
 
 cp "$SUBCON_SCHEMA" "$job_dir/schema.json"
+driver="${SUBCON_DRIVER:-agy}"
 home_dir="${HOME:-$PWD}"
-mkdir -p "$home_dir/.gemini"
+# The driver's own home directory holds its conversations (and, for agy, its credentials).
+if [[ "$driver" == claude ]]; then
+  driver_home=".claude"
+else
+  driver_home=".gemini"
+fi
+mkdir -p "$home_dir/$driver_home"
 
 extra_env=()
 if [[ -n "${SUBCON_CONVERSATION:-}" ]]; then
@@ -40,15 +47,18 @@ fi
 if [[ -n "${GEMINI_API_KEY:-}" ]]; then
   extra_env+=(-e GEMINI_API_KEY)
 fi
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  extra_env+=(-e ANTHROPIC_API_KEY)
+fi
 
 rc=0
 "$engine" run --rm --name "$name" \
   --workdir /work \
   --user "$(id -u):$(id -g)" \
-  -v "$job_dir/work:/work" -v "$job_dir:/job" -v "$home_dir/.gemini:/home/runner/.gemini" \
+  -v "$job_dir/work:/work" -v "$job_dir:/job" -v "$home_dir/$driver_home:/home/runner/$driver_home" \
   -e HOME=/home/runner -e SUBCON_JOB_DIR=/job \
   -e SUBCON_PROMPT_FILE=/job/prompt.txt -e SUBCON_SCHEMA=/job/schema.json \
-  -e SUBCON_JOB_MODEL="$SUBCON_JOB_MODEL" -e SUBCON_TIMEOUT \
+  -e SUBCON_JOB_MODEL="$SUBCON_JOB_MODEL" -e SUBCON_TIMEOUT -e SUBCON_DRIVER="$driver" \
   ${extra_env[@]+"${extra_env[@]}"} \
   "$image" /usr/local/bin/subcon-entry || rc=$?
 
