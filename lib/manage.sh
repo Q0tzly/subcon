@@ -221,7 +221,18 @@ cmd_commit() {
     die "-m <message> required"
   fi
 
-  # Step 4: job_result state: finished, checks not null, checks.ok == true, checks.files_changed not empty
+  # Step 4: Early checks before any side effects
+  require_agy
+
+  # Guard: double commit check
+  local hfile
+  hfile="$(history_file)"
+  if [[ -f "$hfile" ]] && jq -se --arg id "$id" 'any(.type == "event" and .id == $id and .event == "committed")' "$hfile" >/dev/null 2>&1; then
+    echo "subcon: job $id already committed" >&2
+    return 1
+  fi
+
+  # Step 5: job_result state: finished, checks not null, checks.ok == true, checks.files_changed not empty
   local res rc=0
   res="$(job_result "$id")" || rc=$?
   if [[ $rc -ne 0 ]]; then
@@ -256,7 +267,23 @@ cmd_commit() {
     return 1
   fi
 
-  # Step 5: Stage only checks.files_changed via git -C <repo> add -A -- <paths...>
+  # Guard: patch applied check (unless --edited)
+  if [[ $edited -eq 0 ]]; then
+    local patch="$dir/patch.diff"
+    if [[ ! -f "$patch" ]] || ! git -C "$cur_repo" apply --check --reverse "$patch" >/dev/null 2>&1; then
+      echo "subcon: patch not applied for job $id (apply it first or pass --edited)" >&2
+      return 1
+    fi
+  fi
+
+  # Resolve implementer before staging
+  local model
+  model="$(jq -r .model "$dir/meta.json" 2>/dev/null || echo "")"
+  local implementer
+  implementer="$(model_name "$model")"
+  [[ -n "$implementer" ]] || die "unknown model: $model (see: agy models)"
+
+  # Step 6: Stage only checks.files_changed via git -C <repo> add -A -- <paths...>
   local files=()
   local f
   while IFS= read -r f || [[ -n "$f" ]]; do
@@ -273,13 +300,7 @@ cmd_commit() {
     return 1
   fi
 
-  # Step 6: Commit
-  local model
-  model="$(jq -r .model "$dir/meta.json" 2>/dev/null || echo "")"
-  local implementer
-  implementer="$(model_name "$model")"
-  [[ -n "$implementer" ]] || die "unknown model: $model (see: agy models)"
-
+  # Step 7: Commit
   local commit_msg
   commit_msg="$message
 
@@ -296,7 +317,7 @@ Reviewed-By: $SUBCON_REVIEWER"
     return 1
   fi
 
-  # Step 7: Record history event and output JSON
+  # Step 8: Record history event and output JSON
   local commit_hash
   commit_hash="$(git -C "$cur_repo" rev-parse HEAD)"
 
@@ -382,7 +403,25 @@ cmd_reject() {
     return 1
   fi
 
-  # Step 4: Delegation limit check (3 or more finished jobs in history for repo and ticket)
+  # Step 4: Pre-flight checks before any side effects
+  require_agy
+
+  local orig_runner orig_model
+  orig_runner="$(jq -r .runner "$dir/meta.json" 2>/dev/null || echo "")"
+  orig_model="$(jq -r .model "$dir/meta.json" 2>/dev/null || echo "")"
+
+  local effective_runner="${runner:-$orig_runner}"
+  local effective_model="${model:-$orig_model}"
+
+  [[ -f "$SUBCON_ROOT/runners/$effective_runner" && -x "$SUBCON_ROOT/runners/$effective_runner" ]] || die "runner not found: $effective_runner"
+  if [[ "$effective_runner" == "container" ]]; then
+    require_container
+  fi
+  if [[ "$effective_runner" == "ci" ]]; then
+    require_ci "$cur_repo"
+  fi
+
+  # Step 5: Delegation limit check: count only initial delegations for repo and ticket (ignore jobs created by resume)
   local ticket
   ticket="$(jq -r .ticket "$dir/meta.json")"
 
@@ -391,7 +430,7 @@ cmd_reject() {
   local count=0
   if [[ -f "$hfile" ]]; then
     count="$(jq -sr --arg repo "$cur_repo" --arg ticket "$ticket" '
-      map(select(.type == "job" and .repo == $repo and .ticket == $ticket)) | length
+      map(select(.type == "job" and .repo == $repo and .ticket == $ticket and (.resume_of == null))) | length
     ' "$hfile" 2>/dev/null || echo 0)"
   fi
   if [[ "$count" -ge 3 ]]; then
@@ -399,7 +438,7 @@ cmd_reject() {
     return 1
   fi
 
-  # Step 5: Ticket file exists and clean check
+  # Step 6: Ticket file exists and clean check
   local ticket_path="$cur_repo/$ticket"
   if [[ ! -f "$ticket_path" ]]; then
     echo "subcon: ticket file not found: $ticket" >&2
@@ -456,7 +495,7 @@ cmd_reject() {
     return 1
   fi
 
-  # Step 7: Commit ticket file only
+  # Step 8: Commit ticket file only
   if ! git -C "$cur_repo" add -- "$ticket"; then
     echo "subcon: failed to stage ticket" >&2
     return 1
@@ -469,17 +508,10 @@ cmd_reject() {
     return 1
   fi
 
-  # Step 8: Record rejected history event
+  # Step 9: Record rejected history event
   ( history_append_event "$id" rejected ) || echo "subcon: failed to record history for $id" >&2
 
-  # Step 9: Launch new job with cmd_submit
-  local orig_runner orig_model
-  orig_runner="$(jq -r .runner "$dir/meta.json")"
-  orig_model="$(jq -r .model "$dir/meta.json")"
-
-  local effective_runner="${runner:-$orig_runner}"
-  local effective_model="${model:-$orig_model}"
-
+  # Step 10: Launch new job with cmd_submit
   local submit_out submit_rc=0
   submit_out="$(cmd_submit --runner "$effective_runner" --model "$effective_model" "$ticket")" || submit_rc=$?
 
