@@ -3,7 +3,8 @@
 状態: 設計メモ（2026-11-12、上位が起草）。決定 A・B は暫定決定
 （2026-11-12 ユーザー）。Argon レビュー回答（2026-11-12）を受け、
 監督が実コードと実機で精査した結果を反映済み（末尾の「レビュー精査の
-記録」参照）。論点 C は Argon 推奨案を提示してユーザー決定待ち。
+記録」参照）。論点 C は Argon 推奨案をユーザーが採用し決定 C とした
+（2026-11-12）。
 
 ## OpenCode × Sakura AI Engine の検証結果（2026-11-12、監督が実測）
 
@@ -106,7 +107,11 @@ Argon レビュー Q1 を採用して改訂）。**
   3. `drivers/claude` の preflight への env 分岐追加は**不要と判明**
      （精査記録参照）。
 
-## 論点 C（未決定）: CI ランナーでの claude 認証 = setup-token 方式
+## 決定 C: CI ランナーでの claude 認証 = setup-token 主＋ API キー予備
+
+**Argon の推奨案（Q6）を採用する（2026-11-12 ユーザー決定）。
+setup-token を第一とし、`ANTHROPIC_API_KEY` もフォールバックとして
+許容する両対応とする。**
 
 CI ランナー（self-hosted、現行は Mac mini）で claude を使うには、
 ランナーの非対話文脈から読める認証が要る。対話ログインは macOS では
@@ -121,26 +126,27 @@ Keychain 保存になり、agy で踏んだのと同じ理由で非対話文脈�
   （Pro / Max / Team / Enterprise が必要。なお 2026-06 以降、
   `claude -p` の利用は対話枠とは別の月次 Agent SDK クレジットから
   引かれる建付けに変わっている）。
-- 置き場所の案: GitHub の Secrets には入れず、ランナーマシン上の
-  利用者だけが読めるファイル（例: mini の `~/.config/subcon/` 配下、
-  権限 600）に置き、ワークフロー／ランナー起動時に環境へ読み込む。
-  制御面に鍵を渡さない既定原則と同型（自分のマシン・自分のトークン・
-  自分のジョブ）。1 年で失効し自動更新は無いので、失効時期の記録が要る。
-- 未決定: この方式で進めるか。代替は「CI + claude は API キー方式のみ」
-  （B と揃える）か、「CI + claude は対応しない」。
-- **Argon の推奨（Q6）**: setup-token を第一とし、`ANTHROPIC_API_KEY`
-  もフォールバックとして許容する両対応。読み込みは「環境変数が既に
-  あればそれを使い、無ければ `~/.config/subcon/claude-env`（600）を
-  source」。1年失効への対処として、失効日ファイル
-  （`~/.config/subcon/claude-token-expires`）と、認証失敗時に失効を
-  疑うヒントを stderr に出す仕掛けを推奨。ユーザーの決定待ち。
+- 置き場所: GitHub の Secrets には入れず、ランナーマシン上の
+  利用者だけが読めるファイルに置き、ワークフロー／ランナー起動時に
+  環境へ読み込む。制御面に鍵を渡さない既定原則と同型（自分の
+  マシン・自分のトークン・自分のジョブ）。
+- 読み込みの形（票38 で実装）: `ci/run-job.sh` は
+  `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` が環境にあれば
+  それを使い、無ければ `~/.config/subcon/claude-env`（権限 600）を
+  source する。どちらも無ければ認証情報なしとして失敗させる。
+- 1 年で失効し自動更新は無い。失効日ファイル
+  `~/.config/subcon/claude-token-expires`（ISO 日付 1 行）を置き、
+  認証に失敗した場合は失効を疑うヒントを stderr に出す。
+- トークンの発行（`claude setup-token` の対話操作）とファイル配置は
+  ユーザー本人がランナーマシン上で行う。票38 の実装とテストは
+  ダミー値で完結させ、実トークンの投入は実機確認の段で行う。
 
 ## 票の構成（Argon レビュー Q9 の並べ替えを採用）
 
 | 票 | 内容 |
 | --- | --- |
 | 37 | container + claude 対応（決定 B＋ Q5 の必須事項: 配管統一、`ANTHROPIC_API_KEY` 素通し、`~/.claude` マウント、ガード変更、イメージ同梱） |
-| 38 | ci + claude 対応（論点 C の決定に従う。配管は `SUBCON_CI_DRIVER` の追加と認証 env の読み込みが中心） |
+| 38 | ci + claude 対応（決定 C: 配管は `SUBCON_CI_DRIVER` の追加、認証は setup-token 主＋ API キー予備で env ファイルから読み込み） |
 | 39 | `drivers/opencode` 本実装（改訂後の決定 A、ウォッチドッグ、usage 写像、`model_name` フォールバック、`exit_code_for` の null→2 追従） |
 | 40 | 履歴・統計への `driver` 記録（`history.jsonl` に `driver`、`stats` に `by_driver`。Q10）と、会話 ID 保証の2段階の仕様明記（Q2: `docs/spec/backend.md` / `runner.md`） |
 
