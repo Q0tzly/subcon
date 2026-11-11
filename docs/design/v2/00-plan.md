@@ -29,6 +29,7 @@
 | 24 | `subcon reject`（差し戻し。Notes 追記＋票コミット＋再 submit、再委任 2 回までを強制） | Flash | `bin/subcon` `lib/manage.sh` `docs/design/v2.md` `docs/delegation.md` |
 | 25 | ファイル形式の版付け（`v: 1`）と history 行種別の `.type` 統一 | Flash | `lib/job.sh` `lib/history.sh` `lib/manage.sh` `docs/design/v2.md` |
 | 26 | ランナー契約のモデル env を `SUBCON_MODEL` から `SUBCON_JOB_MODEL` に分離 | Flash | `lib/job.sh` `runners/local` `runners/container` `runners/container-entry.sh` `ci/run-job.sh` `docs/design/v2.md` `docs/design/container-runner.md` |
+| 27 | 仕様の切り出し（`docs/spec/` を現行仕様の正本にする） | Flash | `docs/spec/cli.md` `docs/spec/files.md` `docs/spec/runner.md` `docs/spec/backend.md` `docs/design/v2.md` `README.md` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
