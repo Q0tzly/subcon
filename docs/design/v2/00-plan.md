@@ -32,6 +32,8 @@
 | 27 | 仕様の切り出し（`docs/spec/` を現行仕様の正本にする） | Flash | `docs/spec/cli.md` `docs/spec/files.md` `docs/spec/runner.md` `docs/spec/backend.md` `docs/design/v2.md` `README.md` |
 | 28 | 入口コマンドの健全化（run の複数票、resume の ci 拒否、trailer の引数解析、wait のタイムアウト判定） | Flash | `lib/query.sh` `lib/job.sh` `lib/common.sh` |
 | 29 | commit / reject の事前検証と安全化（副作用の前に検証、commit の逆適用・二重ガード、reject の上限は委任回数だけ数える） | Flash | `lib/manage.sh` |
+| 30 | 仕様の追従（Argon レビュー残件: stats スキーマ・show の終了コード・委任上限・`## Files` の実仕様・ランナーの入出力と SIGTERM・env 棚卸し・プロンプト連結） | Flash | `docs/spec/cli.md` `docs/spec/files.md` `docs/spec/runner.md` `docs/spec/backend.md` |
+| 31 | `subcon log <id>` の新設（ジョブの `log` ファイルをそのまま出力。実行中でも読める） | Flash | `bin/subcon` `lib/manage.sh` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す

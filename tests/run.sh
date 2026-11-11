@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject formats runnerenv entry guard history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
+# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1771,10 +1771,41 @@ test_guard_reject_cap_ignores_resume() {
   assert_eq "$(jobcount)" 2 jobs
 }
 
+# ---- logcmd (ticket 31) ----------------------------------------------------
+
+test_logcmd_prints_log() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  echo "marker-line-xyz" >> "$(jobdir "$ID")/log"
+  sub log "$ID"
+  assert_rc 0 || return 1
+  assert_match "$OUT" "marker-line-xyz" log_content
+}
+
+test_logcmd_missing_log() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  rm -f "$(jobdir "$ID")/log"
+  sub log "$ID"
+  assert_rc 1 || return 1
+  grep -q "no log" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
+test_logcmd_unknown_id() {
+  sub log 20990101-000000-nope-0000
+  assert_rc 1 || return 1
+  grep -q "unknown job id" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
+test_logcmd_no_args() {
+  sub log
+  assert_rc 1 || return 1
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard history stats resume preflight authwarn container containerpre cijob cirunner cipre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
