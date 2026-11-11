@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
+# Groups: ticket submit query manage commit history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,7 +9,7 @@ FAKEBIN="$(mktemp -d)"
 ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
-unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING
+unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING SUBCON_REVIEWER
 unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL FAKE_GH_NO_AUTH FAKE_GH_FOREIGN_OWNER
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -614,6 +614,142 @@ test_manage_discard_running() {
   [[ ! -e "$(jobdir "$ID")" ]] || fail "job dir remains"
   ! kill -0 "$pid" 2>/dev/null || fail "runner still alive"
   assert_eq "$(worktrees)" 1 worktrees
+}
+
+# ---- commit (23) ---------------------------------------------------------
+
+REVIEWER='Test Reviewer <reviewer@example.invalid>'
+
+test_commit_ok() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget -r .id)" "$ID" stdout_id
+  local hash
+  hash="$(jget -r .commit)"
+  assert_eq "$(git rev-parse HEAD)" "$hash" head_is_new_commit
+  [[ "$hash" != "$before" ]] || fail "HEAD did not move"
+  assert_eq "$(git log -1 --format=%s)" "feat: fake change" subject
+  git log -1 --format=%B | grep -Fxq "Co-Authored-By: Gemini 3.8 Flash <noreply@google.com>" \
+    || fail "implementer trailer missing: $(git log -1 --format=%B)"
+  git log -1 --format=%B | grep -Fxq "Reviewed-By: $REVIEWER" \
+    || fail "reviewer trailer missing: $(git log -1 --format=%B)"
+  assert_eq "$(git status --porcelain)" "" tree_clean
+  grep -q '"event":"committed"' "$(hist)" || fail "no committed event in history"
+}
+
+test_commit_edited() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" --edited "$ID"
+  assert_rc 0 || return 1
+  git log -1 --format=%B | grep -Fxq "Co-Authored-By: $REVIEWER" \
+    || fail "reviewer co-author line missing: $(git log -1 --format=%B)"
+  assert_eq "$(git log -1 --format=%B | grep -c '^Co-Authored-By:')" 2 coauthor_lines
+}
+
+test_commit_no_reviewer() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  sub commit -m "feat: fake change" "$ID"
+  assert_rc 1 || return 1
+  grep -q "SUBCON_REVIEWER" "$T/err" || fail "stderr does not mention SUBCON_REVIEWER: $(cat "$T/err")"
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+}
+
+test_commit_no_message() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  SUBCON_REVIEWER="$REVIEWER" sub commit "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+}
+
+test_commit_not_applied() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+  assert_eq "$(git status --porcelain)" "" tree_clean
+}
+
+test_commit_unrelated_untouched() {
+  echo other > other.txt
+  commit_all "add other"
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  echo dirty >> other.txt
+  echo stray > stray.txt
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(git show HEAD:other.txt)" "other" unrelated_not_swept_in
+  assert_match "$(git status --porcelain)" "other.txt" unrelated_change_remains
+  assert_match "$(git status --porcelain)" "stray.txt" untracked_remains
+}
+
+test_commit_checks_failed() {
+  export FAKE_AGY_MODE=outside
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+}
+
+test_commit_no_changes() {
+  export FAKE_AGY_MODE=partial
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+}
+
+test_commit_unknown_id() {
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" nope
+  assert_rc 1
+}
+
+test_commit_twice() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: again" "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
 }
 
 # ---- history (10) --------------------------------------------------------
@@ -1304,7 +1440,7 @@ test_containerpre_local_unaffected() {
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container containerpre cijob cirunner cipre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit history stats resume preflight authwarn container containerpre cijob cirunner cipre)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
