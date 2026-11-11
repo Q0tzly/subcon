@@ -1,0 +1,158 @@
+#!/bin/bash
+# opencode driver: runs the job's prompt with OpenCode (opencode run) in the current directory (the job's work/).
+# Usage: drivers/opencode <job-dir>. The caller (a runner) has already cd'd into work/.
+set -euo pipefail
+
+case "${1:-}" in
+  preflight)
+    if ! command -v opencode >/dev/null 2>&1; then
+      echo "opencode not found: install OpenCode and make sure it is on PATH" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  models)
+    printf '%s\t%s\n' \
+      "sakura/preview/Kimi-K2.7-Code" "Kimi K2.7 Code (Sakura)" \
+      "sakura/gpt-oss-120b" "gpt-oss-120b (Sakura)"
+    exit 0
+    ;;
+  default-model)
+    echo "${SUBCON_OPENCODE_DEFAULT_MODEL:-sakura/preview/Kimi-K2.7-Code}"
+    exit 0
+    ;;
+esac
+
+job_dir="${1:?job directory required}"
+[[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
+
+# Step 1: append the report instruction to the prompt. The augmented copy is kept in the job directory.
+prompt_file="$job_dir/prompt.driver.txt"
+{
+  cat "$SUBCON_PROMPT_FILE"
+  printf '\n\n## Final report\n\n'
+  echo 'Your final message must be a single JSON object that conforms to the JSON Schema below. Output only that JSON object: no sentences and no code fence before or after it.'
+  echo
+  cat "$SUBCON_SCHEMA"
+  echo
+} > "$prompt_file"
+prompt="$(cat "$prompt_file")"
+
+stream="$job_dir/agy.stream"
+watchdog="${SUBCON_OPENCODE_WATCHDOG:-20}"
+
+timeout_cmd=()
+if [[ -n "${SUBCON_TIMEOUT:-}" ]]; then
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=(timeout "$SUBCON_TIMEOUT")
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd=(gtimeout "$SUBCON_TIMEOUT")
+  fi
+fi
+
+session_args=()
+[[ -z "${SUBCON_CONVERSATION:-}" ]] || session_args=(--session "$SUBCON_CONVERSATION")
+
+# kill_tree <pid>: stop the process and its descendants, children first.
+kill_tree() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$child"; done
+  kill "$1" 2>/dev/null || true
+}
+
+# start_opencode: run opencode in the background, stdout straight into the stream file.
+# The stream is truncated on every attempt, so only the final run is parsed.
+start_opencode() {
+  ${timeout_cmd[@]+"${timeout_cmd[@]}"} opencode run --format json --dangerously-skip-permissions \
+    -m "$SUBCON_JOB_MODEL" ${session_args[@]+"${session_args[@]}"} -- "$prompt" \
+    < /dev/null > "$stream" &
+  oc_pid=$!
+}
+
+# watch_start: returns 0 once the stream shows step_start, 1 if opencode exits first,
+# 2 if no step_start appears within the watchdog period.
+watch_start() {
+  local waited=0
+  while kill -0 "$oc_pid" 2>/dev/null; do
+    if grep -Eq '"type"[[:space:]]*:[[:space:]]*"step_start"' "$stream" 2>/dev/null; then
+      return 0
+    fi
+    if (( waited >= watchdog )); then
+      return 2
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+# Step 2: launch, restarting once if the run never starts (no model turn has happened yet).
+start_time=$SECONDS
+attempt=1
+oc_rc=0
+while :; do
+  start_opencode
+  watch_rc=0
+  watch_start || watch_rc=$?
+  if [[ $watch_rc -eq 2 ]]; then
+    kill_tree "$oc_pid"
+    wait "$oc_pid" 2>/dev/null || true
+    if [[ $attempt -eq 1 ]]; then
+      attempt=2
+      continue
+    fi
+    oc_rc=1
+    break
+  fi
+  wait "$oc_pid" || oc_rc=$?
+  break
+done
+duration=$((SECONDS - start_time))
+
+# Step 3: conversation ID from the first event that carries one (best effort).
+conversation="$({ jq -R -r 'fromjson? | (.sessionID // .part.sessionID // empty)' "$stream" 2>/dev/null || true; } | head -n 1)"
+
+# Step 4: sum token usage over all step_finish events. cache.write is dropped, as drivers/claude does.
+usage="$(jq -R -n -c '
+  [inputs | fromjson? | select(.type == "step_finish") | .part.tokens // empty] as $t
+  | {
+      input_tokens: ([$t[] | (.input // 0)] | add // 0),
+      output_tokens: ([$t[] | (.output // 0)] | add // 0),
+      total_tokens: ([$t[] | (.total // 0)] | add // 0),
+      thinking_tokens: ([$t[] | (.reasoning // 0)] | add // 0),
+      cache_read_tokens: ([$t[] | (.cache.read // 0)] | add // 0)
+    }
+' "$stream")"
+
+# Step 5: the report is the last text event. Extract it as whole text, then as a ```json fence,
+# then as the span from the first { to the last }; the first object found is validated.
+final_text="$(jq -R -n -r '[inputs | fromjson? | select(.type == "text") | (.part.text // empty)] | .[-1] // empty' "$stream" 2>/dev/null || true)"
+
+jq -cn \
+  --arg t "$final_text" \
+  --arg sid "$conversation" \
+  --argjson dur "$duration" \
+  --argjson usage "$usage" \
+  --argjson rc "$oc_rc" '
+  def obj: fromjson? | select(type == "object");
+  def valid:
+    (type == "object")
+    and (((["status", "summary", "files_changed", "commands_run", "design_questions", "issues_found"]) - keys) == [])
+    and (.status == "done" or .status == "partial" or .status == "blocked");
+  (first(
+     ($t | obj),
+     ($t | capture("```json\\s*(?<j>[\\s\\S]*?)```")? | .j | obj),
+     ($t | capture("(?<j>\\{[\\s\\S]*\\})")? | .j | obj)
+   ) // null) as $found
+  | (if $found != null and ($found | valid) then $found else null end) as $report
+  | (if $sid == "" then {} else {conversation_id: $sid} end) as $conv
+  | if $rc == 0 then
+      {status: "SUCCESS"} + $conv + {duration_seconds: $dur, usage: $usage}
+      + (if $report == null then {} else {structured_output: $report} end)
+    else
+      {status: "ERROR"} + $conv + {error: "opencode exited without a result"}
+    end
+' > "$job_dir/agy.json"
+
+# Step 6: exit code follows the opencode process; a missing report is not an error here.
+[[ "$oc_rc" -eq 0 ]]

@@ -55,7 +55,7 @@
 | --- | --- |
 | 0 | 正常終了。`wait` / `run` では待機した全ジョブが `status: done` かつ `checks.ok: true` |
 | 1 | 使い方の誤り・前提条件の不足（引数不正、agy/jq の未検出、票の構文検証失敗、未知のジョブ ID、パッチ適用失敗など） |
-| 2 | いずれかのジョブで実装役（バックエンド）が `partial` または `blocked` を申告 |
+| 2 | いずれかのジョブで実装役（バックエンド）が `partial` または `blocked` を申告、または報告なし（`status: null`）で完了 |
 | 3 | いずれかのジョブでチェック違反が発生（ worktree 内でのコミット、または `## Files` 範囲外ファイルの変更） |
 | 4 | いずれかのジョブが `state: failed`（バックエンドの実行失敗、タイムアウト、ランナーの消失、ジョブ起動失敗など） |
 | 5 | `wait` のタイムアウト到達（ジョブが未終了のまま指定時間を超過） |
@@ -88,7 +88,7 @@
 ## 主なオプション
 
 - `--runner R`: ジョブを実行するランナーを指定する（`runners/` 配下のスクリプト名）。既定値は `local`。指定されたランナーが存在しない場合は終了コード 1。
-- `--driver D`: 実装役ドライバを指定する（`drivers/` 配下の名前）。`submit` / `run` / `trailer` で使える。`resume` は元ジョブのドライバに固定され、`reject` は元ジョブのドライバで再委任する。既定値は環境変数 `SUBCON_DRIVER` の値、未設定時は `agy`。`ci` ランナーは `agy` と `claude` に対応する。`ci` で `claude` を使う認証はランナーマシン側で用意する（環境変数 `CLAUDE_CODE_OAUTH_TOKEN`（setup-token）または `ANTHROPIC_API_KEY`。ランナーマシンの `~/.config/subcon/claude-env` に置いてもよい）。`container` ランナーは `agy` と `claude` に対応し、`claude` の場合は環境変数 `ANTHROPIC_API_KEY` が必要（未設定・空なら submit 時に終了コード 1 で失敗する）。
+- `--driver D`: 実装役ドライバを指定する（`drivers/` 配下の名前）。`submit` / `run` / `trailer` で使える。`resume` は元ジョブのドライバに固定され、`reject` は元ジョブのドライバで再委任する。既定値は環境変数 `SUBCON_DRIVER` の値、未設定時は `agy`。`opencode` ドライバも選択でき、モデルは `provider/model` 形式で任意に指定できる（既定はドライバの `default-model`）。`ci` ランナーは `agy` と `claude` に対応する。`ci` で `claude` を使う認証はランナーマシン側で用意する（環境変数 `CLAUDE_CODE_OAUTH_TOKEN`（setup-token）または `ANTHROPIC_API_KEY`。ランナーマシンの `~/.config/subcon/claude-env` に置いてもよい）。`container` ランナーは `agy` と `claude` に対応し、`claude` の場合は環境変数 `ANTHROPIC_API_KEY` が必要（未設定・空なら submit 時に終了コード 1 で失敗する）。
 - `--model M`: 選択したドライバに渡すモデル ID を指定する。既定値は環境変数 `SUBCON_MODEL` の値、未設定時はドライバごとの既定モデル（`agy`: `gemini-3.8-flash-medium`、`claude`: `claude-haiku-5-5`）。
 - `--timeout T`（`submit` / `run` / `resume`）: ドライバに渡すタイムアウト文字列（例: `30m`, `540s`）。既定値は `30m`（`resume` で省略時は再開元ジョブの設定値を引き継ぐ）。
 - `--timeout SEC`（`wait`）: 待機する秒数（整数）。既定値は `0`（無期限）。指定秒数が経過しても完了していないジョブがある場合、その時点の結果（未終了ジョブは `state: queued` または `running`）を出力して終了コード 5 で終了する（ジョブ自体は停止させない）。

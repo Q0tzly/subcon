@@ -75,7 +75,7 @@ exit_code_for() {
     | map(
         if .state == "failed" then 4
         elif (.checks != null and .checks.ok == false) then 3
-        elif (.status == "partial" or .status == "blocked") then 2
+        elif (.status == "partial" or .status == "blocked" or (.state == "finished" and .status == null)) then 2
         else 0
         end
       )

@@ -108,11 +108,13 @@ warn_consumer_auth() {
   return 0
 }
 
-# model_name <model> <driver>: "Gemini 3.8 Flash (Medium)" -> "Gemini 3.8 Flash"
+# model_name <model> <driver>: "Gemini 3.8 Flash (Medium)" -> "Gemini 3.8 Flash".
+# A model the driver does not list (e.g. opencode's provider/model) is returned as its ID.
 model_name() {
-  local bin
+  local bin name
   bin="$(driver_path "$2")" || return 1
-  "$bin" models 2>/dev/null | awk -F'\t' -v id="$1" '$1 == id { sub(/ \([^)]*\)$/, "", $2); print $2 }'
+  name="$("$bin" models 2>/dev/null | awk -F'\t' -v id="$1" '$1 == id { sub(/ \([^)]*\)$/, "", $2); print $2 }')"
+  echo "${name:-$1}"
 }
 
 cmd_trailer() {
