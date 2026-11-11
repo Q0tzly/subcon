@@ -1234,11 +1234,17 @@ test_cirunner_workflow_failure() {
 # ---- cipre (21) ---------------------------------------------------------------
 
 test_cipre_gh_missing() {
-  local d="$T/bin"
+  local d="$T/bin" f n
   mkdir -p "$d"
   cp "$ROOT/tests/fake-agy" "$d/agy"
   chmod +x "$d/agy"
-  PATH="$d:/usr/bin:/bin" sub submit --runner ci docs/t/01-a.md
+  # A PATH of everything except gh: some systems ship gh in /usr/bin, so a
+  # bare restricted PATH cannot be trusted to hide it.
+  for f in /usr/bin/* /bin/*; do
+    n="$(basename "$f")"
+    [[ "$n" == gh ]] || ln -s "$f" "$d/$n" 2>/dev/null || true
+  done
+  PATH="$d" sub submit --runner ci docs/t/01-a.md
   assert_rc 1 || return 1
   grep -q "gh" "$T/err" || fail "stderr does not mention gh: $(cat "$T/err")"
   assert_eq "$(jobcount)" 0 jobs
