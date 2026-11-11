@@ -45,7 +45,9 @@
 - 票16（ランナー本体）・票17（事前確認）とも実装済み。全テスト 82 件通過（fake engine による契約検証を含む）
 - 実エンジンでの煙テストは Mac mini（Apple Silicon、colima の docker）で実施済み（2026-11-11）。実 Containerfile のビルド成功（イメージ内 agy 1.5.5 を確認）、fake-agy に差し替えた変種イメージで `--runner container` の実ジョブが finished / done、パッチ生成まで確認。検証中に見つけた不具合: エントリスクリプトのモードがソース側のファイルモード依存で、環境によっては実行ユーザー（ホスト uid）が読めず起動に失敗する → Containerfile で `chmod 755` を明示するよう修正済み
 - この VM では実エンジン実行は不可（2026-11-11 に試行）: docker / podman が無く、mise 経由は podman-remote と nerdctl の CLI のみ。nerdctl-full で containerd 起動まではできたが、レジストリ CDN への TLS タイムアウトと runc の setns 拒否（`operation not permitted`）でコンテナを実行できない
-- 既知の制限（未検証の論点）: worktree の `.git` ファイルはホスト側リポジトリへの絶対パスを指すため、コンテナ内の git はそのままではリポジトリを解決できない。ファイル編集中心の agy の動作には影響しない見込みだが、実 agy がコンテナ内で git を使う場合の挙動は今後の確認事項
+- コンテナ内の git は現行のマウント構成では使えない（2026-11-11 に Mac mini で検証済み）。worktree の `.git` ファイルが指すホスト側 gitdir がマウント外のため `fatal: not a git repository: .../.git/worktrees/<name>` になる。ファイル編集は問題ないが、コンテナ内で git を実行して失敗終了するエージェントはジョブごと落ちる（fake-agy の commit モードで実ジョブが exit 128 で失敗することを確認。ホスト側のパッチ生成・チェックは無事）
+- 対処の検証結果: 本体 `.git` を同じ絶対パスにマウントすれば gitdir は解決するが、(1) rw マウントはホストのリポジトリの `.git`（config・hooks を含む）への書き込みをコンテナに許すことになり隔離が崩れる、(2) ro マウントでは `git status` は動くが `git add` 以後の書き込み系が index.lock で失敗する、(3) macOS（virtiofs）ではマウント内のファイルが root 所有に見えるため、どちらの場合も `safe.directory` の設定が別途必要
+- 推奨する修正方針（未着手・要判断）: container ジョブでは worktree の代わりにジョブ内へローカル clone を作り、`work/` の中に実体の `.git` を持たせる。git がフルに使え、本体の `.git` には一切触れない。あわせてイメージ側に `safe.directory`（`/work` のみ）を入れる
 
 ## 票への分割
 
