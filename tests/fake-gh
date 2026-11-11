@@ -1,0 +1,93 @@
+#!/bin/bash
+# Test double for the GitHub CLI, covering only what runners/ci uses:
+#   gh workflow run <file> -f job=.. -f ticket=.. -f base=.. -f model=.. -f timeout=..
+#   gh run list --workflow <file> --limit N --json ...
+#   gh run download <id> -n <name> -D <dir>
+#   gh run cancel <id>
+# A dispatch simulates the CI side by running the real ci/run-job.sh against
+# FAKE_GH_WORKSPACE (with the caller's PATH, so fake-agy is found) and storing
+# its artifact under FAKE_GH_STATE. The run's conclusion is FAKE_GH_CONCLUSION
+# (default success). State lives in FAKE_GH_STATE; nothing here talks to GitHub.
+set -uo pipefail
+
+state="${FAKE_GH_STATE:?FAKE_GH_STATE required}"
+mkdir -p "$state/runs" "$state/artifacts"
+
+cmd="${1:-}"
+if [[ $# -gt 0 ]]; then shift; fi
+case "$cmd" in
+  workflow)
+    # workflow run <file> -f k=v ...
+    if [[ $# -gt 0 ]]; then shift; fi  # "run"
+    if [[ $# -gt 0 ]]; then shift; fi  # workflow file
+    job="" ticket="" base="" model="" timeout=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -f|--field)
+          kv="${2:-}"
+          if [[ $# -ge 2 ]]; then shift; fi
+          case "$kv" in
+            job=*) job="${kv#job=}" ;;
+            ticket=*) ticket="${kv#ticket=}" ;;
+            base=*) base="${kv#base=}" ;;
+            model=*) model="${kv#model=}" ;;
+            timeout=*) timeout="${kv#timeout=}" ;;
+          esac
+          ;;
+      esac
+      shift
+    done
+    id=1000
+    [[ -f "$state/nextid" ]] && id="$(cat "$state/nextid")"
+    echo $((id + 1)) > "$state/nextid"
+    rt="$state/rt-$id"
+    art="$state/artifacts/$id"
+    mkdir -p "$art"
+    RUNNER_TEMP="$rt" GITHUB_WORKSPACE="${FAKE_GH_WORKSPACE:?FAKE_GH_WORKSPACE required}" \
+      SUBCON_CI_JOB="$job" SUBCON_CI_TICKET="$ticket" SUBCON_CI_BASE="$base" \
+      SUBCON_CI_MODEL="$model" SUBCON_CI_TIMEOUT="$timeout" \
+      bash "${FAKE_GH_SUBCON_ROOT:?FAKE_GH_SUBCON_ROOT required}/ci/run-job.sh" >/dev/null 2>&1 || true
+    cp "$rt/subcon-$job/artifact/"* "$art/" 2>/dev/null || true
+    jq -cn --argjson id "$id" --arg t "subcon $job" --arg c "${FAKE_GH_CONCLUSION:-success}" \
+      '{databaseId: $id, displayTitle: $t, status: "completed", conclusion: $c}' > "$state/runs/$id.json"
+    ;;
+  run)
+    sub="${1:-}"
+    if [[ $# -gt 0 ]]; then shift; fi
+    case "$sub" in
+      list)
+        shopt -s nullglob
+        files=("$state"/runs/*.json)
+        if [[ ${#files[@]} -gt 0 ]]; then
+          jq -s '.' "${files[@]}"
+        else
+          echo '[]'
+        fi
+        ;;
+      download)
+        id="" dir=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            -D) dir="${2:-}"; if [[ $# -ge 2 ]]; then shift; fi ;;
+            -n|--name) if [[ $# -ge 2 ]]; then shift; fi ;;
+            -*) ;;
+            *) [[ -n "$id" ]] || id="$1" ;;
+          esac
+          shift
+        done
+        [[ -n "$id" && -n "$dir" ]] || { echo "fake-gh: download needs id and -D" >&2; exit 1; }
+        mkdir -p "$dir"
+        cp "$state/artifacts/$id/"* "$dir/" 2>/dev/null || { echo "fake-gh: no artifact for run $id" >&2; exit 1; }
+        ;;
+      cancel)
+        id="${1:-}"
+        if [[ -n "$id" && -f "$state/runs/$id.json" ]]; then
+          jq '.status = "completed" | .conclusion = "cancelled"' "$state/runs/$id.json" > "$state/runs/$id.json.tmp" \
+            && mv "$state/runs/$id.json.tmp" "$state/runs/$id.json"
+        fi
+        ;;
+      *) echo "fake-gh: unsupported run subcommand: $sub" >&2; exit 1 ;;
+    esac
+    ;;
+  *) echo "fake-gh: unsupported command: $cmd" >&2; exit 1 ;;
+esac

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage history stats resume preflight authwarn container containerpre cijob (all when none given).
+# Groups: ticket submit query manage history stats resume preflight authwarn container containerpre cijob cirunner (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,7 +10,7 @@ ln -s "$ROOT/tests/fake-agy" "$FAKEBIN/agy"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
 unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING
-unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE
+unset GEMINI_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
@@ -1181,6 +1181,47 @@ test_cijob_fail_still_packages() {
   [[ ! -f "$art/agy.json" ]] || fail "agy.json should not exist when agy produced no result"
 }
 
+# ---- cirunner (20) -----------------------------------------------------------
+
+gh_bin() {
+  local d="$T/bin"
+  mkdir -p "$d"
+  cp "$ROOT/tests/fake-agy" "$d/agy"
+  cp "$ROOT/tests/fake-gh" "$d/gh"
+  chmod +x "$d/agy" "$d/gh"
+  echo "$d"
+}
+
+test_cirunner_ok() {
+  PATH="$(gh_bin):$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
+    sub run --runner ci docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .state)" finished state || return 1
+  assert_eq "$(jget .status)" done status || return 1
+  assert_eq "$(jget -r '.checks.files_changed | join(",")')" "README.md" files_changed || return 1
+  grep -q "fake change" "$(jget .patch)" || fail "patch lacks the fake change: $(cat "$(jget .patch)")"
+}
+
+test_cirunner_workflow_failure() {
+  PATH="$(gh_bin):$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
+    FAKE_GH_CONCLUSION=failure FAKE_AGY_MODE=fail \
+    sub run --runner ci docs/t/01-a.md
+  assert_rc 4 || return 1
+  assert_eq "$(jget .state)" failed state
+}
+
+test_cirunner_gh_missing() {
+  local d="$T/bin"
+  mkdir -p "$d"
+  cp "$ROOT/tests/fake-agy" "$d/agy"
+  chmod +x "$d/agy"
+  PATH="$d:/usr/bin:/bin" FAKE_GH_STATE="$T/ghstate" \
+    sub run --runner ci docs/t/01-a.md
+  assert_rc 4 || return 1
+  assert_eq "$(jget .state)" failed state || return 1
+  grep -q "gh" "$SUBCON_STATE/jobs/$(jget .id)/log" || fail "job log does not mention gh: $(cat "$SUBCON_STATE/jobs/$(jget .id)/log")"
+}
+
 # ---- containerpre (17) -----------------------------------------------------
 
 test_containerpre_engine_missing() {
@@ -1213,7 +1254,7 @@ test_containerpre_local_unaffected() {
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container containerpre cijob)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage history stats resume preflight authwarn container containerpre cijob cirunner)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
