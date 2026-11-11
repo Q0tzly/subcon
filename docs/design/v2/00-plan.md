@@ -42,6 +42,7 @@
 | 37 | container + claude 対応（決定 B＋ Q5 必須事項: ガード変更、`SUBCON_DRIVER` 配管、`ANTHROPIC_API_KEY` 素通し、`~/.claude` マウント、イメージ同梱。設計は ../phase6-followups.md） | Haiku（予備 Flash） | `lib/job.sh` `runners/container` `runners/container-entry.sh` `container/Containerfile` `docs/spec/cli.md` `docs/spec/runner.md` |
 | 38 | ci + claude 対応（決定 C: `SUBCON_CI_DRIVER` の配管、認証は setup-token 主＋ API キー予備で `~/.config/subcon/claude-env` から読み込み。設計は ../phase6-followups.md） | Haiku（予備 Flash） | `lib/job.sh` `runners/ci` `.github/workflows/subcon-job.yml` `ci/run-job.sh` `docs/spec/cli.md` `docs/spec/runner.md` |
 | 39 | `drivers/opencode` 本実装（改訂後の決定 A: プロンプト指示＋3段階抽出・検証、失敗時は報告なし完了。起動ウォッチドッグ、usage 写像、`model_name` フォールバック、`exit_code_for` の null→2 追従。設計は ../phase6-followups.md） | Haiku（予備 Flash） | `drivers/opencode` `lib/common.sh` `lib/query.sh` `docs/spec/cli.md` `README.md` |
+| 40 | 履歴・統計への `driver` 記録（`history.jsonl` に `driver`、`stats` に `by_driver`。Q10）と、会話 ID 保証の 2 段階の仕様明記（Q2） | Haiku（予備 Flash） | `lib/history.sh` `lib/stats.sh` `docs/spec/files.md` `docs/spec/backend.md` `docs/spec/runner.md` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す

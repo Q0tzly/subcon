@@ -915,6 +915,17 @@ test_history_job_line() {
   assert_eq "$(jq -r .resume_of <<<"$l")" null resume_of
 }
 
+test_history_driver_field() {
+  sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r .driver <<<"$(hline 1)")" agy driver.default
+  local fc
+  fc="$(fake_claude_path)"
+  PATH="$fc:$PATH" sub run --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r .driver <<<"$(hline 2)")" claude driver.claude
+}
+
 test_history_failed_job() {
   FAKE_AGY_MODE=fail sub run docs/t/01-a.md
   assert_rc 4 || return 1
@@ -1005,12 +1016,12 @@ hjob() {
   fi
   jq -cn --arg id "$1" --arg repo "$2" --arg model "$3" --arg state "$4" --arg created "$created" \
     --argjson status "$( [[ $5 == null ]] && echo null || echo "\"$5\"")" \
-    --argjson ok "$6" --argjson dur "$7" --argjson tin "$8" --argjson tout "$9" '
+    --argjson ok "$6" --argjson dur "$7" --argjson tin "$8" --argjson tout "$9" --arg drv "${11:-}" '
     {type: "job", id: $id, repo: $repo, ticket: "docs/t/x.md", model: $model, runner: "local",
      created_at: $created, finished_at: $created, duration_s: $dur, state: $state, status: $status,
      checks_ok: $ok, files_changed: 1, insertions: 1, deletions: 0,
      tokens: (if $tin == null then null else {input: $tin, output: $tout, total: ($tin + $tout), cache_read: 5, thinking: 2} end),
-     resume_of: null}' >> "$(hist)"
+     resume_of: null} + (if $drv == "" then {} else {driver: $drv} end)' >> "$(hist)"
 }
 hevent() { jq -cn --arg id "$1" '{type: "event", id: $id, event: "applied", at: "2026-01-01T00:00:00Z"}' >> "$(hist)"; }
 
@@ -1053,6 +1064,22 @@ test_stats_counts() {
   assert_eq "$(jget -c .tokens)" '{"input":128,"output":32,"total":160,"cache_read":15,"thinking":6}' tokens
   assert_eq "$(jget -c .by_model.m1)" '{"jobs":2,"success":1,"applied":1,"tokens_total":150}' m1
   assert_eq "$(jget -c .by_model.m2)" '{"jobs":2,"success":0,"applied":1,"tokens_total":10}' m2
+}
+
+test_stats_by_driver() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 10 5 0 claude
+  hjob B "$TOP" m1 finished partial true 10 10 5 0 claude
+  hjob C "$TOP" m1 finished done true 10 10 5 0 agy
+  hjob D "$TOP" m1 finished done true 10 10 5
+  sub stats
+  assert_rc 0 || return 1
+  assert_eq "$(jget -c .by_driver.claude)" '{"jobs":2,"success":1,"applied":0,"tokens_total":30}' by_driver.claude
+  assert_eq "$(jget -c .by_driver.agy)" '{"jobs":2,"success":2,"applied":0,"tokens_total":30}' by_driver.agy
+  sub stats --text
+  assert_rc 0 || return 1
+  grep -q "Driver breakdown:" <<<"$OUT" || fail "text output lacks the driver breakdown: $OUT"
+  grep -q "claude" <<<"$OUT" || fail "text output lacks the claude row: $OUT"
 }
 
 test_stats_all() {
