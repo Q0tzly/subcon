@@ -80,3 +80,7 @@ tests/run.sh submit     # グループ指定: ticket submit query manage history
 
 - local ランナーでは、agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。隔離が必要なときは container ランナーを使う。container ランナーでもネットワークは隔離されない（agy が API に到達するため）
 - agy の認証が消費者向け Google ログインの場合、`submit` / `resume` は警告を出す。消費者プランのログインをサードパーティ製エージェントから使うことは Antigravity の規約で認められておらず、アカウント停止の対象になりうる。API キー方式（`modelProvider: gemini` ＋ `GEMINI_API_KEY`）か、自分自身のスクリプト／CI からの利用がサポートされる形（詳細は docs/delegation.md）
+
+## ライセンス
+
+Apache License 2.0（[LICENSE](LICENSE)）。個人・商用を問わず、手元や自分の CI で動かす分は無料で使える。
