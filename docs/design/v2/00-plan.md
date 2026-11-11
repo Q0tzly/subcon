@@ -38,6 +38,7 @@
 | 33 | ドライバ抽出（agy 起動ブロックを `drivers/agy` へ分離、振る舞い無変更。設計は ../driver-layer.md） | Haiku（予備 Flash） | `drivers/agy` `runners/local` `runners/container-entry.sh` `container/Containerfile` `lib/job.sh` `lib/common.sh` |
 | 34 | ドライバ選択と事前確認の一般化（`--driver` / `SUBCON_DRIVER`、`preflight` / `models`、resume のドライバ固定。設計は ../driver-layer.md） | Haiku（予備 Flash） | `lib/common.sh` `lib/job.sh` `bin/subcon` `tests/` |
 | 35 | `drivers/claude` 本実装（claude -p の正規化、会話 ID の事前確定、フェイクでの検証。設計は ../driver-layer.md） | Haiku（予備 Flash） | `drivers/claude` `tests/` |
+| 36 | ドライバの文書追従（`docs/spec/` と README に `--driver` / `SUBCON_DRIVER` / ドライバ契約を反映、usage の trailer 行） | Haiku（予備 Flash） | `docs/spec/cli.md` `docs/spec/runner.md` `docs/spec/files.md` `README.md` `bin/subcon` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
