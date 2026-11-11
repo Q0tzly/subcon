@@ -1,0 +1,163 @@
+#!/bin/bash
+# claude driver: runs the job's prompt with claude (Claude Code) in the current directory (the job's work/).
+# Usage: drivers/claude <job-dir>. The caller (a runner) has already cd'd into work/.
+set -euo pipefail
+
+case "${1:-}" in
+  preflight)
+    if ! command -v claude >/dev/null 2>&1; then
+      echo "claude not found: install Claude Code and make sure it is on PATH" >&2
+      exit 1
+    fi
+    auth_out=""
+    if ! auth_out="$(claude auth status 2>/dev/null)"; then
+      echo "claude is not signed in: run claude auth login" >&2
+      exit 1
+    fi
+    if [[ "$(echo "$auth_out" | jq -r '.loggedIn // false' 2>/dev/null)" != "true" ]]; then
+      echo "claude is not signed in: run claude auth login" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  models)
+    printf '%s\t%s\n' \
+      "claude-haiku-5-5" "Claude Haiku 5.5" \
+      "sonnet" "Claude Sonnet" \
+      "opus" "Claude Opus"
+    exit 0
+    ;;
+  default-model)
+    echo "claude-haiku-5-5"
+    exit 0
+    ;;
+esac
+
+job_dir="${1:?job directory required}"
+[[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
+
+# Step 1: determine conversation ID and initialize agy.stream
+generate_uuid() {
+  local u=""
+  if command -v uuidgen >/dev/null 2>&1; then
+    u="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" || u=""
+  fi
+  if [[ -z "$u" && -r /proc/sys/kernel/random/uuid ]]; then
+    u="$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" || u=""
+  fi
+  if [[ -z "$u" ]] && command -v python3 >/dev/null 2>&1; then
+    u="$(python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null | tr -d '[:space:]')" || u=""
+  fi
+  [[ -n "$u" ]] || return 1
+  echo "$u"
+}
+
+conv="${SUBCON_CONVERSATION:-}"
+if [[ -z "$conv" ]]; then
+  conv="$(generate_uuid)" || {
+    echo "drivers/claude: failed to determine conversation id" >&2
+    exit 1
+  }
+fi
+
+jq -cn --arg c "$conv" '{event: "init", conversation_id: $c}' > "$job_dir/agy.stream"
+
+# Step 2: launch claude
+session_args=()
+if [[ -n "${SUBCON_CONVERSATION:-}" ]]; then
+  session_args=(--resume "$SUBCON_CONVERSATION")
+else
+  session_args=(--session-id "$conv")
+fi
+
+mcp_args=()
+if [[ -z "${SUBCON_CLAUDE_MCP_CONFIG:-}" ]]; then
+  mcp_args=(--strict-mcp-config --mcp-config '{"mcpServers":{}}')
+elif [[ "$SUBCON_CLAUDE_MCP_CONFIG" == "project" ]]; then
+  mcp_args=()
+else
+  mcp_args=(--strict-mcp-config --mcp-config "$SUBCON_CLAUDE_MCP_CONFIG")
+fi
+
+timeout_cmd=()
+if [[ -n "${SUBCON_TIMEOUT:-}" ]]; then
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=(timeout "$SUBCON_TIMEOUT")
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd=(gtimeout "$SUBCON_TIMEOUT")
+  fi
+fi
+
+prompt="$(cat "$SUBCON_PROMPT_FILE")"
+raw_out="$(mktemp)"
+trap 'rm -f "$raw_out"' EXIT
+
+claude_rc=0
+# The prompt goes first: --mcp-config is variadic in claude and would swallow
+# a trailing prompt as another config path. --json-schema takes the schema
+# JSON itself, not a path, so the file content is passed.
+${timeout_cmd[@]+"${timeout_cmd[@]}"} claude -p "$prompt" \
+  --model "$SUBCON_JOB_MODEL" \
+  --output-format json \
+  --permission-mode acceptEdits \
+  --allowedTools "Read,Edit,Write,Bash,Grep,Glob" \
+  --json-schema "$(cat "$SUBCON_SCHEMA")" \
+  "${session_args[@]}" \
+  ${mcp_args[@]+"${mcp_args[@]}"} \
+  < /dev/null > "$raw_out" || claude_rc=$?
+
+cat "$raw_out" >> "$job_dir/agy.stream"
+
+# Step 3: convert claude output envelope to agy.json
+converted=0
+if [[ -s "$raw_out" ]] && jq -e 'type == "object" and (has("subtype") or has("is_error") or has("result"))' "$raw_out" >/dev/null 2>&1; then
+  if jq -c --arg conv "$conv" '
+    (if (.is_error // false) or (.subtype != "success") then "ERROR" else "SUCCESS" end) as $status |
+    (
+      if (.structured_output != null) then
+        .structured_output
+      elif (.result | type == "string") then
+        (try (.result | fromjson | select(type == "object")) catch null)
+      else
+        null
+      end
+    ) as $so |
+    (
+      if $status == "ERROR" then
+        (if ((.result | type) == "string" and .result != "") then .result else (.subtype // "claude error") end)
+      else
+        null
+      end
+    ) as $err |
+    {
+      conversation_id: (.session_id // $conv),
+      status: $status
+    }
+    + (if $so != null then {structured_output: $so} else {} end)
+    + (if $err != null then {error: $err} else {} end)
+    + (if (has("duration_ms") and .duration_ms != null) then {duration_seconds: (.duration_ms / 1000)} else {} end)
+    + (if (has("total_cost_usd") and .total_cost_usd != null) then {cost_usd: .total_cost_usd} else {} end)
+    + {
+        usage: {
+          input_tokens: ((.usage.input_tokens // 0)),
+          output_tokens: ((.usage.output_tokens // 0)),
+          total_tokens: (((.usage.input_tokens // 0) + (.usage.output_tokens // 0))),
+          cache_read_tokens: ((.usage.cache_read_input_tokens // 0)),
+          thinking_tokens: 0
+        }
+      }
+  ' "$raw_out" > "$job_dir/agy.json" 2>/dev/null; then
+    converted=1
+  fi
+fi
+
+if [[ "$converted" -eq 0 || ! -s "$job_dir/agy.json" ]]; then
+  jq -cn --arg conv "$conv" '{status: "ERROR", conversation_id: $conv, error: "claude exited without a result"}' > "$job_dir/agy.json"
+fi
+
+# Step 4: exit code based on agy.json status
+if [[ "$(jq -r '.status // empty' "$job_dir/agy.json" 2>/dev/null)" == "SUCCESS" ]]; then
+  exit 0
+else
+  exit 1
+fi
