@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
+# Groups: ticket submit query manage commit reject history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -752,6 +752,124 @@ test_commit_twice() {
   assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
 }
 
+# ---- reject (24) ---------------------------------------------------------
+
+test_reject_ok() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local old="$ID"
+  sub reject -m "理由テキスト" "$old"
+  assert_rc 0 || return 1
+  assert_eq "$(jget -r .reject_of)" "$old" reject_of
+  assert_eq "$(jget -r .ticket)" "docs/t/01-a.md" ticket
+  local new
+  new="$(jget -r .id)"
+  [[ -n "$new" && "$new" != "null" && "$new" != "$old" ]] || fail "no new job id: $OUT"
+  [[ -d "$(jobdir "$old")" ]] || fail "old job was discarded"
+  grep -q "理由テキスト" docs/t/01-a.md || fail "reason not in ticket: $(cat docs/t/01-a.md)"
+  grep -q "^## Notes" docs/t/01-a.md || fail "no Notes section added: $(cat docs/t/01-a.md)"
+  assert_eq "$(git log -1 --format=%s)" "reject: docs/t/01-a.md" commit_subject
+  assert_eq "$(git status --porcelain)" "" tree_clean
+  grep -q '"event":"rejected"' "$(hist)" || fail "no rejected event in history"
+  wait_done "$new" || return 1
+  assert_eq "$(result "$new" .state)" finished new_job_state
+}
+
+test_reject_existing_notes() {
+  mkdir -p docs/t2
+  cat > docs/t2/01-b.md <<'EOF'
+# t
+
+## Goal
+g
+
+## Files
+- README.md
+
+## Notes
+- 既存のメモ
+
+## Acceptance
+- `true`
+EOF
+  commit_all "add t2"
+  sub submit docs/t2/01-b.md
+  assert_rc 0 || return 1
+  ID="$(jget -r '.[0].id')"
+  wait_done "$ID" || return 1
+  sub reject -m "直してほしい" "$ID"
+  assert_rc 0 || return 1
+  awk '/^## Notes/{n=1} /^## Acceptance/{n=0} n' docs/t2/01-b.md | grep -q "直してほしい" \
+    || fail "reason not inside Notes section: $(cat docs/t2/01-b.md)"
+  grep -q "既存のメモ" docs/t2/01-b.md || fail "existing note lost"
+}
+
+test_reject_no_message() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local before
+  before="$(git rev-parse HEAD)"
+  sub reject "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+  assert_eq "$(git status --porcelain)" "" tree_clean
+}
+
+test_reject_unknown_id() {
+  sub reject -m "x" nope
+  assert_rc 1
+}
+
+test_reject_unfinished() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=30
+  submit_one docs/t/01-a.md || return 1
+  wait_state "$ID" running || return 1
+  sub reject -m "x" "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git status --porcelain)" "" tree_clean
+}
+
+test_reject_dirty_ticket() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  echo dirty >> docs/t/01-a.md
+  local before
+  before="$(git rev-parse HEAD)"
+  sub reject -m "理由" "$ID"
+  assert_rc 1 || return 1
+  assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+  ! grep -q "理由" docs/t/01-a.md || fail "reason appended despite dirty ticket"
+}
+
+test_reject_cap() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub reject -m "1回目" "$ID"
+  assert_rc 0 || return 1
+  local j2
+  j2="$(jget -r .id)"
+  wait_done "$j2" || return 1
+  sub reject -m "2回目" "$j2"
+  assert_rc 0 || return 1
+  local j3
+  j3="$(jget -r .id)"
+  wait_done "$j3" || return 1
+  sub reject -m "3回目" "$j3"
+  assert_rc 1 || return 1
+  assert_eq "$(jobcount)" 3 jobs
+}
+
+test_reject_preserves_runner_model() {
+  submit_one --model gemini-3.8-flash-high docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub reject -m "理由" "$ID"
+  assert_rc 0 || return 1
+  local new
+  new="$(jget -r .id)"
+  assert_eq "$(jq -r .model "$(jobdir "$new")/meta.json")" "gemini-3.8-flash-high" model_preserved
+  assert_eq "$(jq -r .runner "$(jobdir "$new")/meta.json")" "local" runner_preserved
+}
+
 # ---- history (10) --------------------------------------------------------
 
 hist() { echo "$SUBCON_STATE/history.jsonl"; }
@@ -1440,7 +1558,7 @@ test_containerpre_local_unaffected() {
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit history stats resume preflight authwarn container containerpre cijob cirunner cipre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject history stats resume preflight authwarn container containerpre cijob cirunner cipre)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
