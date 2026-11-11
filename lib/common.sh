@@ -133,9 +133,18 @@ cmd_trailer() {
   require_agy
   local model
   model="$(default_model)"
-  if [[ "${1:-}" == "--model" ]]; then
-    model="${2:?--model needs a value}"
-  fi
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --model)
+        [[ $# -ge 2 ]] || die "--model requires a value"
+        model="$2"
+        shift 2
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
   local name
   name="$(model_name "$model")"
   [[ -n "$name" ]] || die "unknown model: $model (see: agy models)"

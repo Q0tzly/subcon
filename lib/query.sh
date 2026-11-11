@@ -132,7 +132,6 @@ cmd_wait() {
   done
 
   local timed_out=0
-  local sleep_count=0
   local start_time=$SECONDS
   local results_json=""
 
@@ -158,14 +157,13 @@ cmd_wait() {
       break
     fi
 
-    if (( timeout > 0 && sleep_count >= timeout * 2 && SECONDS - start_time >= timeout )); then
+    if (( timeout > 0 && SECONDS - start_time >= timeout )); then
       timed_out=1
       results_json="$(printf '%s\n' "${cur_results[@]}" | jq -sc .)"
       break
     fi
 
     sleep 0.5
-    sleep_count=$((sleep_count + 1))
   done
 
   printf '%s\n' "$results_json"
@@ -178,8 +176,34 @@ cmd_wait() {
 }
 
 cmd_run() {
+  local tickets=()
+  local pass_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --runner|--model|--timeout)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        pass_args+=("$1" "$2")
+        shift 2
+        ;;
+      -*)
+        die "unknown option: $1"
+        ;;
+      *)
+        tickets+=("$1")
+        pass_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ ${#tickets[@]} -eq 0 ]]; then
+    die "run takes one ticket"
+  elif [[ ${#tickets[@]} -gt 1 ]]; then
+    die "run takes only one ticket"
+  fi
+
   local submit_out submit_rc=0
-  submit_out="$(cmd_submit "$@")" || submit_rc=$?
+  submit_out="$(cmd_submit "${pass_args[@]}")" || submit_rc=$?
   if [[ $submit_rc -ne 0 ]]; then
     if [[ -n "$submit_out" ]]; then
       if jq -e 'type == "array"' <<<"$submit_out" >/dev/null 2>&1; then

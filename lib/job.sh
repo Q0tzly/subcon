@@ -226,24 +226,24 @@ cmd_resume() {
   local repo
   repo="$(repo_top)"
   [[ "$(jq -r .repo "$dir/meta.json")" == "$repo" ]] || die "job $id belongs to another repository"
+
+  local runner
+  runner="$(jq -r .runner "$dir/meta.json")"
+  [[ "$runner" != "ci" ]] || die "resume is not supported for the ci runner"
+
   # job_result settles a job whose runner vanished, so a killed job becomes failed first.
   job_result "$id" >/dev/null || true
   [[ "$(cat "$dir/state" 2>/dev/null)" == "failed" ]] || die "job $id is not failed (only failed jobs can be resumed)"
   [[ -n "$(jq -r '.conversation // empty' "$dir/result.json")" ]] || die "job $id has no conversation to resume (agy wrote no conversation_id)"
 
-  local ticket base runner model
+  local ticket base model
   ticket="$(jq -r .ticket "$dir/meta.json")"
   base="$(jq -r .base "$dir/meta.json")"
-  runner="$(jq -r .runner "$dir/meta.json")"
   model="$(jq -r .model "$dir/meta.json")"
   [[ -n "$timeout" ]] || timeout="$(jq -r .timeout "$dir/meta.json")"
 
   if [[ "$runner" == "container" ]]; then
     require_container
-  fi
-
-  if [[ "$runner" == "ci" ]]; then
-    require_ci "$repo"
   fi
 
   local result rc=0
