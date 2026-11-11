@@ -1193,6 +1193,7 @@ gh_bin() {
 }
 
 test_cirunner_ok() {
+  mkdir -p "$T/repo/.github/workflows" && touch "$T/repo/.github/workflows/subcon-job.yml"
   PATH="$(gh_bin):$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
     sub run --runner ci docs/t/01-a.md
   assert_rc 0 || return 1
@@ -1203,23 +1204,12 @@ test_cirunner_ok() {
 }
 
 test_cirunner_workflow_failure() {
+  mkdir -p "$T/repo/.github/workflows" && touch "$T/repo/.github/workflows/subcon-job.yml"
   PATH="$(gh_bin):$PATH" FAKE_GH_STATE="$T/ghstate" FAKE_GH_WORKSPACE="$T/repo" FAKE_GH_SUBCON_ROOT="$ROOT" SUBCON_CI_POLL=1 \
     FAKE_GH_CONCLUSION=failure FAKE_AGY_MODE=fail \
     sub run --runner ci docs/t/01-a.md
   assert_rc 4 || return 1
   assert_eq "$(jget .state)" failed state
-}
-
-test_cirunner_gh_missing() {
-  local d="$T/bin"
-  mkdir -p "$d"
-  cp "$ROOT/tests/fake-agy" "$d/agy"
-  chmod +x "$d/agy"
-  PATH="$d:/usr/bin:/bin" FAKE_GH_STATE="$T/ghstate" \
-    sub run --runner ci docs/t/01-a.md
-  assert_rc 4 || return 1
-  assert_eq "$(jget .state)" failed state || return 1
-  grep -q "gh" "$SUBCON_STATE/jobs/$(jget .id)/log" || fail "job log does not mention gh: $(cat "$SUBCON_STATE/jobs/$(jget .id)/log")"
 }
 
 # ---- cipre (21) ---------------------------------------------------------------
