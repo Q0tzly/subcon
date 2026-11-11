@@ -391,7 +391,7 @@ cmd_reject() {
   local count=0
   if [[ -f "$hfile" ]]; then
     count="$(jq -sr --arg repo "$cur_repo" --arg ticket "$ticket" '
-      map(select((has("event") | not) and .repo == $repo and .ticket == $ticket)) | length
+      map(select(.type == "job" and .repo == $repo and .ticket == $ticket)) | length
     ' "$hfile" 2>/dev/null || echo 0)"
   fi
   if [[ "$count" -ge 3 ]]; then

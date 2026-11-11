@@ -131,7 +131,7 @@ job_create() {
     conversation="$(jq -r '.conversation // empty' "$from_dir/result.json")"
   fi
 
-  if ! json_out '{id: $id, repo: $repo, ticket: $ticket, base: $base, runner: $runner, model: $model, timeout: $timeout, created_at: $created_at}
+  if ! json_out '{v: 1, id: $id, repo: $repo, ticket: $ticket, base: $base, runner: $runner, model: $model, timeout: $timeout, created_at: $created_at}
       + (if $resume_of == "" then {} else {resume_of: $resume_of, conversation: $conversation} end)' \
     --arg id "$job_id" \
     --arg repo "$repo" \
@@ -432,6 +432,7 @@ job_finalize() {
     --argjson checks "$checks" \
     --argjson report "$report" \
     '{
+      v: 1,
       id: $id,
       repo: $repo,
       ticket: $ticket,

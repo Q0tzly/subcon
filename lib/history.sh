@@ -65,6 +65,7 @@ history_append_job() {
     --argjson agy "$agy_json" \
     '{
       type: "job",
+      v: 1,
       id: $meta.id,
       repo: $meta.repo,
       ticket: $meta.ticket,
@@ -128,7 +129,7 @@ history_append_event() {
     --arg id "$id" \
     --arg event "$event" \
     --arg at "$at" \
-    '{type: "event", id: $id, event: $event, at: $at}')" || return 1
+    '{type: "event", v: 1, id: $id, event: $event, at: $at}')" || return 1
 
   _history_append "$line"
 }
