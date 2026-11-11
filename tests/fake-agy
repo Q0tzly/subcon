@@ -64,6 +64,10 @@ change() {
 
 case "${FAKE_AGY_MODE:-ok}" in
   ok) change; report done ;;
+  layout)
+    if [[ -d .git ]]; then echo "git-layout: clone" >> "$first_file"; else echo "git-layout: worktree" >> "$first_file"; fi
+    if git status --porcelain >/dev/null 2>&1; then echo "git-works: yes" >> "$first_file"; else echo "git-works: no" >> "$first_file"; fi
+    report done ;;
   outside) change; echo x > outside.txt; report done ;;
   commit)
     change
