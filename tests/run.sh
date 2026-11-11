@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre (all when none given).
+# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1229,6 +1229,105 @@ test_resume_history() {
   assert_eq "$(jq -r --arg id "$new" 'select(.type == "job" and .id == $id) | .resume_of' "$SUBCON_STATE/history.jsonl")" "$ID" resume_of
 }
 
+# ---- driver (34) -----------------------------------------------------------
+
+# Copy the subcon tree to $SX with an extra fake driver installed, so
+# driver-selection tests never touch the real tree.
+make_driver_tree() {
+  SX="$T/subcon-x"
+  mkdir -p "$SX"
+  cp -r "$ROOT/bin" "$ROOT/lib" "$ROOT/drivers" "$ROOT/runners" "$ROOT/schema" "$SX/"
+  cat > "$SX/drivers/fakeok" <<'DRIVER_EOF'
+#!/bin/bash
+set -euo pipefail
+case "${1:-}" in
+  preflight) exit 0 ;;
+  models) printf 'fake-1\tFake Model One\n'; exit 0 ;;
+  default-model) echo fake-1; exit 0 ;;
+esac
+job_dir="$1"
+prompt="$(cat "$SUBCON_PROMPT_FILE")"
+if [[ -n "${SUBCON_CONVERSATION:-}" ]]; then
+  f="$(git status --porcelain | awk 'NR == 1 { print $2 }')"
+else
+  f="$(awk '/^## /{ f = ($0 ~ /^## Files/); next } f && /^[-*][[:space:]]/ { sub(/^[-*][[:space:]]+/, ""); gsub(/`/, ""); print; exit }' <<<"$prompt")"
+fi
+echo "fake change" >> "$f"
+if [[ "${FAKE_DRIVER_MODE:-ok}" == "error" ]]; then
+  jq -cn '{status: "ERROR", conversation_id: "fake-conv-1", error: "fake driver error"}' > "$job_dir/agy.json"
+  exit 1
+fi
+jq -cn --arg f "$f" '{status: "SUCCESS", conversation_id: "fake-conv-1", duration_seconds: 1, usage: {input_tokens: 1, output_tokens: 2, total_tokens: 3, cache_read_tokens: 0, thinking_tokens: 0}, structured_output: {status: "done", summary: "fake driver did it", files_changed: [$f], commands_run: [], design_questions: [], issues_found: []}}' > "$job_dir/agy.json"
+DRIVER_EOF
+  chmod +x "$SX/drivers/fakeok"
+}
+
+subx() { OUT="$("$SX/bin/subcon" "$@" 2>"$T/err")" && RC=0 || RC=$?; }
+
+test_driver_unknown() {
+  sub submit --driver nope docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "unknown driver: nope" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_driver_agy_missing() {
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home no-agy)"
+  HOME="$h" PATH="$cp" sub submit --driver agy docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "agy not found" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_driver_fake_ok() {
+  make_driver_tree
+  subx submit --driver fakeok docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  local d
+  d="$(jobdir "$ID")"
+  assert_eq "$(jq -r .driver "$d/meta.json")" fakeok meta.driver
+  assert_eq "$(jq -r .model "$d/meta.json")" fake-1 meta.model
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .checks.ok)" true checks.ok
+  assert_eq "$(result "$ID" .report.summary)" "fake driver did it" report.summary
+}
+
+test_driver_fake_trailer() {
+  make_driver_tree
+  SUBCON_DRIVER=fakeok subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" '^Co-Authored-By: Fake Model One <[^>]+>$' trailer
+}
+
+test_driver_fake_resume_pinned() {
+  make_driver_tree
+  export FAKE_DRIVER_MODE=error
+  subx submit --driver fakeok docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  export FAKE_DRIVER_MODE=ok
+  subx resume "$ID"
+  assert_rc 0 || return 1
+  local new
+  new="$(jget '.[0].id')"
+  wait_done "$new" || return 1
+  assert_eq "$(jq -r .driver "$(jobdir "$new")/meta.json")" fakeok resumed.meta.driver
+  assert_eq "$(result "$new" .status)" done resumed.status
+}
+
+test_driver_container_guard() {
+  make_driver_tree
+  subx submit --runner container --driver fakeok docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "supports the agy driver only" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
 # ---- preflight (14) --------------------------------------------------------
 
 test_preflight_missing_submit() {
@@ -1342,7 +1441,6 @@ test_container_entry_uses_driver() {
     SUBCON_JOB_MODEL="gemini-3.8-flash-medium" \
     SUBCON_TIMEOUT="30m" \
     SUBCON_SCHEMA="$ROOT/schema/result.schema.json" \
-    SUBCON_SETTINGS='{}' \
     PATH="$bin:$PATH" \
     "$ROOT/runners/container-entry.sh" ) || fail "container entry failed"
   [[ -s "$d/agy.json" ]] || fail "entry produced no agy.json"
@@ -1836,7 +1934,7 @@ test_logcmd_no_args() {
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
