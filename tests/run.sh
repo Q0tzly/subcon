@@ -1571,7 +1571,7 @@ test_driver_opencode_custom_model_trailer() {
   assert_rc 0 || return 1
   ID="$(jget '.[0].id')"
   wait_done "$ID" || return 1
-  PATH="$oc:$PATH" subx trailer
+  PATH="$oc:$PATH" subx trailer --driver opencode --model sakura/custom-model-x
   assert_rc 0 || return 1
   assert_match "$OUT" '^Co-Authored-By: sakura/custom-model-x <[^>]+>$' trailer
 }
