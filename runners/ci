@@ -1,0 +1,134 @@
+#!/bin/bash
+set -euo pipefail
+
+job_dir="${1:?job directory required}"
+[[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
+[[ -d "$job_dir" ]] || { echo "runners/ci: job directory not found: $job_dir" >&2; exit 1; }
+
+job_id="$(basename "$job_dir")"
+meta_file="$job_dir/meta.json"
+[[ -f "$meta_file" ]] || { echo "runners/ci: meta.json not found: $meta_file" >&2; exit 1; }
+
+repo="$(jq -r .repo "$meta_file")"
+ticket="$(jq -r .ticket "$meta_file")"
+base="$(jq -r .base "$meta_file")"
+model="$(jq -r .model "$meta_file")"
+timeout="$(jq -r .timeout "$meta_file")"
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "runners/ci: gh not found in PATH" >&2
+  exit 1
+fi
+
+run_id=""
+tmp_dir=""
+
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM HUP
+  if [[ "$rc" -eq 143 && -n "${run_id:-}" ]]; then
+    gh run cancel "$run_id" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${tmp_dir:-}" && -d "$tmp_dir" ]]; then
+    rm -rf "$tmp_dir"
+  fi
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 143' INT TERM HUP
+
+cd "$repo" || { echo "runners/ci: failed to cd to repo: $repo" >&2; exit 1; }
+
+gh workflow run subcon-job.yml \
+  -f "job=$job_id" \
+  -f "ticket=$ticket" \
+  -f "base=$base" \
+  -f "model=$model" \
+  -f "timeout=$timeout" || exit 1
+
+timeout_secs=0
+case "$timeout" in
+  *m)
+    num="${timeout%m}"
+    timeout_secs=$(( num * 60 ))
+    ;;
+  *s)
+    num="${timeout%s}"
+    timeout_secs="$num"
+    ;;
+  *)
+    timeout_secs="$timeout"
+    ;;
+esac
+if [[ -z "$timeout_secs" ]] || ! [[ "$timeout_secs" =~ ^[0-9]+$ ]]; then
+  timeout_secs=1800
+fi
+deadline_secs=$(( timeout_secs + 120 ))
+
+poll_interval="${SUBCON_CI_POLL:-5}"
+start_time=$SECONDS
+conclusion=""
+
+while true; do
+  if (( SECONDS - start_time > deadline_secs )); then
+    if [[ -n "$run_id" ]]; then
+      gh run cancel "$run_id" >/dev/null 2>&1 || true
+    fi
+    echo "runners/ci: run timed out after ${deadline_secs}s" >&2
+    exit 1
+  fi
+
+  runs_json="$(gh run list --workflow subcon-job.yml --limit 20 --json databaseId,displayTitle,status,conclusion 2>/dev/null || true)"
+  if [[ -n "$runs_json" ]]; then
+    run_entry="$(echo "$runs_json" | jq -c --arg t "subcon $job_id" '.[] | select(.displayTitle == $t)' 2>/dev/null | head -n 1 || true)"
+    if [[ -n "$run_entry" ]]; then
+      curr_id="$(echo "$run_entry" | jq -r '.databaseId // empty' 2>/dev/null || true)"
+      curr_status="$(echo "$run_entry" | jq -r '.status // empty' 2>/dev/null || true)"
+      if [[ -n "$curr_id" ]]; then
+        run_id="$curr_id"
+      fi
+      if [[ "$curr_status" == "completed" ]]; then
+        conclusion="$(echo "$run_entry" | jq -r '.conclusion // empty' 2>/dev/null || true)"
+        break
+      fi
+    fi
+  fi
+
+  sleep "$poll_interval"
+done
+
+if [[ -z "$run_id" ]]; then
+  echo "runners/ci: run databaseId not found" >&2
+  exit 1
+fi
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/subcon-ci-artifact.XXXXXX")"
+
+if ! gh run download "$run_id" -n subcon-artifact -D "$tmp_dir"; then
+  echo "runners/ci: failed to download artifact for run $run_id" >&2
+  exit 1
+fi
+
+art_dir="$tmp_dir"
+if [[ -d "$tmp_dir/subcon-artifact" ]]; then
+  art_dir="$tmp_dir/subcon-artifact"
+fi
+
+if [[ -f "$art_dir/work.tar.gz" ]]; then
+  rm -rf "$job_dir/work"
+  tar -xzf "$art_dir/work.tar.gz" -C "$job_dir"
+fi
+
+if [[ -f "$art_dir/agy.json" ]]; then
+  cp "$art_dir/agy.json" "$job_dir/agy.json"
+fi
+
+if [[ -f "$art_dir/agy.stream" ]]; then
+  cp "$art_dir/agy.stream" "$job_dir/agy.stream"
+fi
+
+if [[ "$conclusion" == "success" ]]; then
+  exit 0
+else
+  exit 1
+fi
