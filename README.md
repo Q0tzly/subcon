@@ -58,7 +58,7 @@ tests/run.sh            # 全テスト（本物の agy は使わない）
 tests/run.sh submit     # グループ指定: ticket submit query manage history stats resume
 ```
 
-設計は [docs/design/v2.md](docs/design/v2.md)、作業票は [docs/design/v2/](docs/design/v2/)。
+仕様は [docs/spec/](docs/spec/)、設計は [docs/design/v2.md](docs/design/v2.md)、作業票は [docs/design/v2/](docs/design/v2/)。
 
 ## 現状の制約
 

@@ -1,0 +1,78 @@
+仕様の版: 1
+
+この文書は subcon の CLI インターフェースに関する現行仕様の正本である。
+
+# CLI 仕様
+
+## コマンド一覧
+
+すべてのコマンドは git リポジトリ内で実行する（例外: `guide`、`trailer`、および `stats --all`）。
+
+| コマンド | 動作 | stdout の形式 |
+| --- | --- | --- |
+| `subcon new <feature>/<NN-name>` | `docs/design/<feature>/<NN-name>.md` をテンプレートから生成する。既にファイルが存在する場合はエラー | 単体オブジェクト: `{"path": "..."}` |
+| `subcon submit [--runner R] [--model M] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
+| `subcon wait [--timeout SEC] <id>...` | 指定した全ジョブの完了を待機する | 配列: 各ジョブの結果オブジェクト `[{"v": 1, ...}, ...]` |
+| `subcon run [--runner R] [--model M] [--timeout T] <ticket>` | 票 1 枚を `submit` し、完了するまで `wait` する | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
+| `subcon resume [--timeout T] <id>` | 失敗したジョブを、agy の会話履歴を引き継いで新しいジョブとして再開する | 配列: `[{"ticket": "...", "id": "..."|"null", "resume_of": "...", "error": "..."|"null"}]` |
+| `subcon show <id>` | 指定したジョブの結果を表示する。実行中の場合は `state` だけが埋まった結果を返す | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
+| `subcon list [--all]` | 現在のリポジトリのジョブ一覧を表示する。`--all` を指定した場合は全リポジトリのジョブを対象とする（表示のみ） | 配列: `[{"id": "...", "repo": "...", "ticket": "...", "state": "...", "status": "..."|"null", "created_at": "..."}]`（作成日時の降順） |
+| `subcon diff <id>` | ジョブの `patch.diff` をそのまま出力する | テキスト: Unified diff 形式（パッチテキスト） |
+| `subcon apply <id>` | ジョブのパッチを現在の作業ツリーに適用する（インデックスは触らず、コミットはしない） | 単体オブジェクト: `{"id": "...", "applied": true}` |
+| `subcon commit -m <message> [--edited] <id>` | 検収済みの変更をステージングし、trailer（`Co-Authored-By` / `Reviewed-By`）を付与してコミットする | 単体オブジェクト: `{"id": "...", "commit": "<hash>"}` |
+| `subcon reject -m <reason> [--model M] [--runner R] <id>` | 差し戻し理由を票の `## Notes` に追記してコミットし、同一票を再委任する | 単体オブジェクト: `{"id": "..."|"null", "reject_of": "...", "ticket": "...", "error": "..."|"null"}` |
+| `subcon discard <id>...` | 指定したジョブの作業領域およびジョブディレクトリを削除する。実行中のプロセスは停止させる | 単体オブジェクト: `{"discarded": ["<id>", ...]}` |
+| `subcon stats [--all] [--since <N>d\|<N>h] [--text]` | 履歴ファイル（`history.jsonl`）を集計して統計を出力する | 単体オブジェクト: 集計 JSON（`--text` 指定時は人間向けのテキスト表） |
+| `subcon guide` | 委任ルール文書（`docs/delegation.md`）を表示する | テキスト: Markdown |
+| `subcon trailer [--model M]` | コミットメッセージに付与する `Co-Authored-By` 行を表示する | テキスト: `Co-Authored-By: <Model Name> <email>` |
+
+agy の解決を必要とするコマンド（`submit`, `run`, `resume`, `reject`, `trailer`）は、実行前に `PATH` または `$HOME/.local/bin/agy` からバイナリを解決する。どちらにも存在しない場合は処理を開始せず、終了コード 1（`agy not found`）で失敗する。
+
+## 出力の原則
+
+- **標準出力 (stdout)**: 機械可読な JSON のみを出力する。
+  - 例外: `diff`（パッチテキスト）、`guide`（Markdown）、`trailer`（1 行テキスト）、`stats --text`（人間向けの集計表）。
+- **標準エラー出力 (stderr)**: 人間向けの進捗ログ、警告、エラーメッセージのみを出力する。
+- **配列と単体オブジェクトの原則**:
+  - 複数ジョブを同時に扱うことができるコマンド（`submit`, `resume`, `wait`, `list`）は配列を出力する。
+    - `submit <ticket>...`: 引数に複数の票を指定できるため、作成結果の配列 `[{...}, ...]` を返す。
+    - `resume <id>`: 単一の ID を受け取るが、`submit` と同等のジョブ生成インターフェースとして配列 `[{...}]` を返す。
+    - `wait <id>...`: 複数のジョブを同時に待機できるため、各ジョブの結果オブジェクトの配列 `[{...}, ...]` を返す。
+    - `list [--all]`: 複数のジョブの一覧を表すため、ジョブ要約の配列 `[{...}, ...]` を返す。
+  - 単一ジョブまたは単一操作を扱うコマンド（`run`, `show`, `new`, `apply`, `commit`, `reject`, `discard`, `stats`）は単体オブジェクト `{...}` を返す。
+
+## 終了コード表
+
+複数の終了条件に該当する場合は、**数値が大きい方**の終了コードを採用する。
+
+| コード | 意味 |
+| --- | --- |
+| 0 | 正常終了。`wait` / `run` では待機した全ジョブが `status: done` かつ `checks.ok: true` |
+| 1 | 使い方の誤り・前提条件の不足（引数不正、agy/jq の未検出、票の構文検証失敗、未知のジョブ ID、パッチ適用失敗など） |
+| 2 | いずれかのジョブで Flash（バックエンド）が `partial` または `blocked` を申告 |
+| 3 | いずれかのジョブでチェック違反が発生（ worktree 内でのコミット、または `## Files` 範囲外ファイルの変更） |
+| 4 | いずれかのジョブが `state: failed`（agy の実行失敗、タイムアウト、ランナーの消失、ジョブ起動失敗など） |
+| 5 | `wait` のタイムアウト到達（ジョブが未終了のまま指定時間を超過） |
+
+### エラーの扱い
+
+- **前提エラー**: コマンドの引数不正、票の検証失敗、必要なツールの欠落など、ジョブ実行前の前提が満たされない場合は、stderr にエラー理由を出力し、非ゼロの終了コード（主に 1）で終了する。このとき stdout は空となる。
+- **要素単位のエラー**: `submit` や `resume` で複数ジョブの生成を行う際、個別のジョブ生成で失敗が発生した場合は、stdout の該当要素の `id` を `null` とし、`error` フィールドにエラー文字列を格納する。1 件でも失敗が含まれる場合、コマンド全体の終了コードは 4 となる。
+
+## 主なオプション
+
+- `--runner R`: ジョブを実行するランナーを指定する（`runners/` 配下のスクリプト名）。既定値は `local`。指定されたランナーが存在しない場合は終了コード 1。
+- `--model M`: agy に渡すモデル ID を指定する。既定値は環境変数 `SUBCON_MODEL` の値、未設定時は `gemini-3.8-flash-medium`。
+- `--timeout T`（`submit` / `run` / `resume`）: agy の `--print-timeout` に渡す時間文字列（例: `30m`, `540s`）。既定値は `30m`（`resume` で省略時は再開元ジョブの設定値を引き継ぐ）。
+- `--timeout SEC`（`wait`）: 待機する秒数（整数）。既定値は `0`（無期限）。指定秒数が経過しても完了していないジョブがある場合、その時点の結果（未終了ジョブは `state: queued` または `running`）を出力して終了コード 5 で終了する（ジョブ自体は停止させない）。
+
+## 利用者向け環境変数
+
+利用者および上位エージェントが設定可能な環境変数一覧:
+
+- `SUBCON_MODEL`: デフォルトで使用する agy のモデル ID（未設定時は `gemini-3.8-flash-medium`）。
+- `SUBCON_STATE`: subcon の状態ディレクトリのルートパス。ジョブや履歴がここに保存される（未設定時は `${XDG_STATE_HOME:-$HOME/.local/state}/subcon`）。
+- `SUBCON_REVIEWER`: コミット時のレビュアー情報（`Name <email>` 形式）。`subcon commit` を実行する際に設定が必須（未設定時は終了コード 1）。
+- `SUBCON_COAUTHOR_EMAIL`: `subcon commit` や `subcon trailer` で付与される `Co-Authored-By` のメールアドレス（未設定時は `noreply@google.com`）。
+- `SUBCON_CONTAINER_ENGINE`: `container` ランナーで使用するコンテナエンジンバイナリ名またはパス（`docker` または `podman`）。未設定時は `docker` → `podman` の順に自動検出される。
+- `SUBCON_CONTAINER_IMAGE`: `container` ランナーで使用するコンテナイメージ名（未設定時は `subcon-runner:latest`）。
