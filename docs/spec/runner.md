@@ -29,6 +29,8 @@
 - agy の最終出力をジョブディレクトリ直下の `agy.json` に書き出す。
   - agy が途中で強制終了（kill 等）された場合でも、会話 ID が取得できていれば `{status: "ERROR", conversation_id: "...", error: "agy exited without a result"}` を `agy.json` に書き出す。
 - ジョブディレクトリ内に書き出すのは、`agy.json` およびランナー固有のログファイル（`agy.stream` 等）に限定する（パッチの生成やチェック、`result.json` の書き出しはホスト側の subcon が行う）。
+- ランナーの標準出力は回収されない。ジョブの `log` ファイルに残るのは標準エラー出力のみであり、診断情報は標準エラー出力へ書くこと。
+- subcon はジョブの終了・破棄時にランナーへ SIGTERM を送ることがある。ランナーは SIGTERM を受けたら子プロセスを含めて速やかに（目安として 5 秒以内に）終了すること。
 
 ### 終了コード
 
@@ -59,7 +61,7 @@
 | `SUBCON_CI_BASE` | CI ワークフロー | `ci/run-job.sh` に渡すベースコミットハッシュ |
 | `SUBCON_CI_MODEL` | CI ワークフロー | `ci/run-job.sh` に渡すモデル ID |
 | `SUBCON_CI_TIMEOUT` | CI ワークフロー | `ci/run-job.sh` に渡すタイムアウト文字列 |
-| `SUBCON_CI_POLL` | 利用者 / テスト | `runners/ci` のポーリング間隔秒数（既定: 5 秒） |
+| `SUBCON_CI_POLL` | テスト / 内部 | `runners/ci` のポーリング間隔秒数（既定: 5 秒、通常の利用では設定不要） |
 
 ## ランナーごとの拡張
 
@@ -94,12 +96,15 @@ Docker または Podman を用いて使い捨てコンテナ内で agy を実行
 
 GitHub Actions の self-hosted ランナー上でジョブを実行するリモート拡張ランナー。
 
+- **ワークフロー契約**:
+  - 利用者リポジトリ側のワークフローの配置は `.github/workflows/subcon-job.yml`。
+  - `workflow_dispatch` の入力は `job` / `ticket` / `base` / `model` / `timeout` の 5 つ。
 - **run-name による相関**:
   - `gh workflow run subcon-job.yml` を呼び出してリモートワークフローを起動する。
   - ワークフローの `run-name` に `subcon <job-id>` を含めることで、ジョブ ID と Actions の実行（run）を確実に相関させ、完了をポーリング監視する。
 - **artifact の形式**:
   - CI 上のスクリプト（`ci/run-job.sh`）は成果物を名前 `subcon-artifact` の artifact としてアップロードする。
-  - artifact の中身:
+  - 成果物 `subcon-artifact` の中身:
     - `work.tar.gz`: 変更後の `work/` ディレクトリ全体をトップに含む tar アーカイブ。
     - `agy.json`: agy の実行結果（生成されている場合）。
     - `agy.stream`: agy のイベントストリームログ（生成されている場合）。

@@ -18,6 +18,7 @@
 | `subcon show <id>` | 指定したジョブの結果を表示する。実行中の場合は `state` だけが埋まった結果を返す | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
 | `subcon list [--all]` | 現在のリポジトリのジョブ一覧を表示する。`--all` を指定した場合は全リポジトリのジョブを対象とする（表示のみ） | 配列: `[{"id": "...", "repo": "...", "ticket": "...", "state": "...", "status": "..."|"null", "created_at": "..."}]`（作成日時の降順） |
 | `subcon diff <id>` | ジョブの `patch.diff` をそのまま出力する | テキスト: Unified diff 形式（パッチテキスト） |
+| `subcon log <id>` | ジョブの実行ログ（ジョブディレクトリの `log` ファイル）をそのまま出力する。実行中のジョブでも読める | テキスト: ログテキスト |
 | `subcon apply <id>` | ジョブのパッチを現在の作業ツリーに適用する（インデックスは触らず、コミットはしない） | 単体オブジェクト: `{"id": "...", "applied": true}` |
 | `subcon commit -m <message> [--edited] <id>` | 検収済みの変更をステージングし、trailer（`Co-Authored-By` / `Reviewed-By`）を付与してコミットする | 単体オブジェクト: `{"id": "...", "commit": "<hash>"}` |
 | `subcon reject -m <reason> [--model M] [--runner R] <id>` | 差し戻し理由を票の `## Notes` に追記してコミットし、同一票を再委任する | 単体オブジェクト: `{"id": "..."|"null", "reject_of": "...", "ticket": "...", "error": "..."|"null"}` |
@@ -26,12 +27,16 @@
 | `subcon guide` | 委任ルール文書（`docs/delegation.md`）を表示する | テキスト: Markdown |
 | `subcon trailer [--model M]` | コミットメッセージに付与する `Co-Authored-By` 行を表示する | テキスト: `Co-Authored-By: <Model Name> <email>` |
 
-agy の解決を必要とするコマンド（`submit`, `run`, `resume`, `reject`, `trailer`）は、実行前に `PATH` または `$HOME/.local/bin/agy` からバイナリを解決する。どちらにも存在しない場合は処理を開始せず、終了コード 1（`agy not found`）で失敗する。
+agy の解決を必要とするコマンド（`submit`, `run`, `resume`, `commit`, `reject`, `trailer`）は、実行前に `PATH` または `$HOME/.local/bin/agy` からバイナリを解決する。どちらにも存在しない場合は処理を開始せず、終了コード 1（`agy not found`）で失敗する。
+
+### reject の委任上限
+
+同一リポジトリ・同一票に対する初回委任は最大で 3 件まで。`resume` 由来のジョブは数えない。上限到達時の `reject` は終了コード 1 で失敗し、票・履歴・git のいずれも変更しない。
 
 ## 出力の原則
 
 - **標準出力 (stdout)**: 機械可読な JSON のみを出力する。
-  - 例外: `diff`（パッチテキスト）、`guide`（Markdown）、`trailer`（1 行テキスト）、`stats --text`（人間向けの集計表）。
+  - 例外: `diff`（パッチテキスト）、`log`（ログテキスト）、`guide`（Markdown）、`trailer`（1 行テキスト）、`stats --text`（人間向けの集計表）。
 - **標準エラー出力 (stderr)**: 人間向けの進捗ログ、警告、エラーメッセージのみを出力する。
 - **配列と単体オブジェクトの原則**:
   - 複数ジョブを同時に扱うことができるコマンド（`submit`, `resume`, `wait`, `list`）は配列を出力する。
@@ -40,6 +45,7 @@ agy の解決を必要とするコマンド（`submit`, `run`, `resume`, `reject
     - `wait <id>...`: 複数のジョブを同時に待機できるため、各ジョブの結果オブジェクトの配列 `[{...}, ...]` を返す。
     - `list [--all]`: 複数のジョブの一覧を表すため、ジョブ要約の配列 `[{...}, ...]` を返す。
   - 単一ジョブまたは単一操作を扱うコマンド（`run`, `show`, `new`, `apply`, `commit`, `reject`, `discard`, `stats`）は単体オブジェクト `{...}` を返す。
+- **版 (v) の付与**: ジョブ結果オブジェクト（`show` / `wait` / `run` が返すもの）には `v: 1` が付く。`list` の要約オブジェクトと `stats` の集計オブジェクトには `v` を付けない。
 
 ## 終了コード表
 
@@ -54,10 +60,30 @@ agy の解決を必要とするコマンド（`submit`, `run`, `resume`, `reject
 | 4 | いずれかのジョブが `state: failed`（agy の実行失敗、タイムアウト、ランナーの消失、ジョブ起動失敗など） |
 | 5 | `wait` のタイムアウト到達（ジョブが未終了のまま指定時間を超過） |
 
+`show` も同じ規則で単一ジョブの終了コードを返す（実行中・待機中のジョブは 0）。コード 5 は `wait` のタイムアウト時のみ発生する。
+
 ### エラーの扱い
 
 - **前提エラー**: コマンドの引数不正、票の検証失敗、必要なツールの欠落など、ジョブ実行前の前提が満たされない場合は、stderr にエラー理由を出力し、非ゼロの終了コード（主に 1）で終了する。このとき stdout は空となる。
 - **要素単位のエラー**: `submit` や `resume` で複数ジョブの生成を行う際、個別のジョブ生成で失敗が発生した場合は、stdout の該当要素の `id` を `null` とし、`error` フィールドにエラー文字列を格納する。1 件でも失敗が含まれる場合、コマンド全体の終了コードは 4 となる。
+
+## stats の出力スキーマ
+
+`subcon stats` が出力する集計 JSON の全キーの定義:
+
+- `scope`: 集計範囲（`repo` | `all`）。
+- `repo`: 対象リポジトリのパス（`--all` 時は null）。
+- `since`: 指定文字列または null。
+- `jobs`: 対象ジョブ総数。
+- `by_state`: `finished` / `failed` の件数。
+- `by_status`: `done` / `partial` / `blocked` / `none` の件数。
+- `success`: `state` が finished かつ `status` が done かつチェック合格の件数。
+- `success_rate`: `success / jobs`（0.0〜1.0、ジョブ 0 件では null）。
+- `applied`: 履歴に `applied` イベントがあるジョブの件数。
+- `apply_rate`: 同率・同規則（`applied / jobs`。0.0〜1.0、ジョブ 0 件では null）。
+- `duration_s`: `total` と `median`、単位は秒。データがなければ null。
+- `tokens`: `input` / `output` / `total` / `cache_read` / `thinking` の合計。
+- `by_model`: モデル ID をキーに `jobs` / `success` / `applied` / `tokens_total` を持つオブジェクト。
 
 ## 主なオプション
 
@@ -74,5 +100,7 @@ agy の解決を必要とするコマンド（`submit`, `run`, `resume`, `reject
 - `SUBCON_STATE`: subcon の状態ディレクトリのルートパス。ジョブや履歴がここに保存される（未設定時は `${XDG_STATE_HOME:-$HOME/.local/state}/subcon`）。
 - `SUBCON_REVIEWER`: コミット時のレビュアー情報（`Name <email>` 形式）。`subcon commit` を実行する際に設定が必須（未設定時は終了コード 1）。
 - `SUBCON_COAUTHOR_EMAIL`: `subcon commit` や `subcon trailer` で付与される `Co-Authored-By` のメールアドレス（未設定時は `noreply@google.com`）。
+- `SUBCON_NO_AUTH_WARNING`: 設定すると agy の認証方式に関する警告を表示しない。
+- `GEMINI_API_KEY`: subcon 自身は読み取らないが、agy の API キー認証に使われる環境変数で、subcon 経由の実行にも影響する。
 - `SUBCON_CONTAINER_ENGINE`: `container` ランナーで使用するコンテナエンジンバイナリ名またはパス（`docker` または `podman`）。未設定時は `docker` → `podman` の順に自動検出される。
 - `SUBCON_CONTAINER_IMAGE`: `container` ランナーで使用するコンテナイメージ名（未設定時は `subcon-runner:latest`）。
