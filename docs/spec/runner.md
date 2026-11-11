@@ -61,6 +61,7 @@
 | `SUBCON_CI_BASE` | CI ワークフロー | `ci/run-job.sh` に渡すベースコミットハッシュ |
 | `SUBCON_CI_MODEL` | CI ワークフロー | `ci/run-job.sh` に渡すモデル ID |
 | `SUBCON_CI_TIMEOUT` | CI ワークフロー | `ci/run-job.sh` に渡すタイムアウト文字列 |
+| `SUBCON_CI_DRIVER` | CI ワークフロー | `ci/run-job.sh` に渡すドライバ名（未設定・空なら `agy`）。`ci/run-job.sh` が `SUBCON_DRIVER` としてランナーへ渡す |
 | `SUBCON_CI_POLL` | テスト / 内部 | `runners/ci` のポーリング間隔秒数（既定: 5 秒、通常の利用では設定不要） |
 
 ## ランナーごとの拡張
@@ -102,7 +103,8 @@ GitHub Actions の self-hosted ランナー上でジョブを実行するリモ�
 
 - **ワークフロー契約**:
   - 利用者リポジトリ側のワークフローの配置は `.github/workflows/subcon-job.yml`。
-  - `workflow_dispatch` の入力は `job` / `ticket` / `base` / `model` / `timeout` の 5 つ。
+  - `workflow_dispatch` の入力は `job` / `ticket` / `base` / `model` / `timeout` / `driver` の 6 つ。
+  - `driver` は `agy` でない場合のみ dispatch 時に渡す。5 入力の旧ワークフローでも `agy` ジョブは従来どおり動く。`claude` ジョブには 6 入力版のワークフローが必要。
 - **run-name による相関**:
   - `gh workflow run subcon-job.yml` を呼び出してリモートワークフローを起動する。
   - ワークフローの `run-name` に `subcon <job-id>` を含めることで、ジョブ ID と Actions の実行（run）を確実に相関させ、完了をポーリング監視する。
@@ -113,5 +115,9 @@ GitHub Actions の self-hosted ランナー上でジョブを実行するリモ�
     - `agy.json`: agy の実行結果（生成されている場合）。
     - `agy.stream`: agy のイベントストリームログ（生成されている場合）。
   - ホスト側ランナーは artifact をダウンロードし、`tar --no-same-owner -xzf` でジョブディレクトリの `work/` に展開復元し、`agy.json` と `agy.stream` を配置する。
+- **claude 認証**:
+  - `driver=claude` のとき `ci/run-job.sh` は次の順で認証を用意する。1) `CLAUDE_CODE_OAUTH_TOKEN` か `ANTHROPIC_API_KEY` が環境に非空で設定されていればそのまま使う。2) どちらも無ければ `~/.config/subcon/claude-env` を `set -a` で source する（素の `KEY=value` 行で足りる）。3) それでも無ければ clone も実行もせず終了コード 1 で失敗する。
+  - 認証は setup-token（`CLAUDE_CODE_OAUTH_TOKEN`、第一候補）を想定し、`ANTHROPIC_API_KEY` は予備とする。setup-token の失効は 1 年。
+  - 鍵は GitHub Secrets や制御面には置かず、ランナーマシン上にだけ置く。`agy` ジョブは認証に一切触れない。
 - **resume の制限**:
   - CI ランナーでは `subcon resume` による再開は不可（会話 DB はリモートの CI マシン側にのみ保存され、ホスト側での前回収穫パッチの適用と噛み合わないため）。

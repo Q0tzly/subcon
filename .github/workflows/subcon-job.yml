@@ -24,6 +24,11 @@ on:
         description: 'Timeout'
         required: true
         type: string
+      driver:
+        description: 'Driver (agy or claude)'
+        required: false
+        default: 'agy'
+        type: string
 
 permissions:
   contents: read
@@ -41,6 +46,7 @@ jobs:
           SUBCON_CI_BASE: ${{ inputs.base }}
           SUBCON_CI_MODEL: ${{ inputs.model }}
           SUBCON_CI_TIMEOUT: ${{ inputs.timeout }}
+          SUBCON_CI_DRIVER: ${{ inputs.driver }}
         run: bash ci/run-job.sh
       - if: always()
         uses: actions/upload-artifact@v4

@@ -48,8 +48,11 @@ cmd_submit() {
   [[ -f "$SUBCON_ROOT/runners/$runner" && -x "$SUBCON_ROOT/runners/$runner" ]] || die "runner not found: $runner"
   [[ ${#tickets[@]} -gt 0 ]] || die "at least one ticket required"
 
-  if [[ "$runner" == "ci" ]] && [[ "$driver" != agy ]]; then
-    die "the ci runner supports the agy driver only"
+  if [[ "$runner" == "ci" ]]; then
+    case "$driver" in
+      agy|claude) ;;
+      *) die "the ci runner supports the agy and claude drivers only" ;;
+    esac
   fi
 
   if [[ "$runner" == "container" ]]; then

@@ -14,6 +14,7 @@ ticket="$(jq -r .ticket "$meta_file")"
 base="$(jq -r .base "$meta_file")"
 model="$(jq -r .model "$meta_file")"
 timeout="$(jq -r .timeout "$meta_file")"
+driver="$(jq -r '.driver // "agy"' "$meta_file")"
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "runners/ci: gh not found in PATH" >&2
@@ -39,12 +40,19 @@ trap 'exit 143' INT TERM HUP
 
 cd "$repo" || { echo "runners/ci: failed to cd to repo: $repo" >&2; exit 1; }
 
+# 5 入力の旧ワークフローは driver を知らないため、agy のときは渡さない
+driver_arg=()
+if [[ "$driver" != agy ]]; then
+  driver_arg=(-f "driver=$driver")
+fi
+
 gh workflow run subcon-job.yml \
   -f "job=$job_id" \
   -f "ticket=$ticket" \
   -f "base=$base" \
   -f "model=$model" \
-  -f "timeout=$timeout" || exit 1
+  -f "timeout=$timeout" \
+  ${driver_arg[@]+"${driver_arg[@]}"} || exit 1
 
 timeout_secs=0
 case "$timeout" in

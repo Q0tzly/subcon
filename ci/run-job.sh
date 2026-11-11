@@ -6,6 +6,22 @@ if [[ -z "${SUBCON_CI_JOB:-}" || -z "${SUBCON_CI_TICKET:-}" || -z "${SUBCON_CI_B
   exit 1
 fi
 
+driver="${SUBCON_CI_DRIVER:-agy}"
+
+# 0. claude の認証を環境変数 → ~/.config/subcon/claude-env の順で用意する。鍵は GitHub Secrets に置かず、ランナーマシン上のファイルからだけ読む
+if [[ "$driver" == claude ]]; then
+  claude_env_file="$HOME/.config/subcon/claude-env"
+  if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" && -f "$claude_env_file" && -r "$claude_env_file" ]]; then
+    set -a
+    source "$claude_env_file"
+    set +a
+  fi
+  if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo "ci/run-job.sh: no claude credentials: set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (on a self-hosted runner, place them in ~/.config/subcon/claude-env; a setup-token expires after 1 year - check ~/.config/subcon/claude-token-expires)" >&2
+    exit 1
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SELF_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET_REPO="${GITHUB_WORKSPACE:-$SELF_ROOT}"
@@ -44,6 +60,7 @@ export SUBCON_PROMPT_FILE="$JOB_DIR/prompt.txt"
 export SUBCON_JOB_MODEL="$SUBCON_CI_MODEL"
 export SUBCON_TIMEOUT="$SUBCON_CI_TIMEOUT"
 export SUBCON_SCHEMA="$SUBCON_SCHEMA"
+export SUBCON_DRIVER="$driver"
 unset SUBCON_CONVERSATION
 
 runner_rc=0
