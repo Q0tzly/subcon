@@ -127,6 +127,38 @@ model_name() {
   echo "${name:-$1}"
 }
 
+# github_slug <repo>: print "owner/repo" when the origin remote of <repo> is a GitHub URL.
+github_slug() {
+  local url
+  url="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 1
+  url="${url%/}"
+  url="${url%.git}"
+  [[ "$url" =~ ^(git@github\.com:|ssh://git@github\.com/|https://github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$ ]] || return 1
+  echo "${BASH_REMATCH[2]}"
+}
+
+# issue_ref_json <ref> <repo>: print the issue reference as {"repo": "owner/repo", "number": N}.
+# Accepts #N (repo taken from <repo>'s GitHub origin), owner/repo#N, or
+# https://github.com/owner/repo/issues/N. Prints nothing and returns 1 when the reference is
+# not one of these forms, has no usable number, or needs an origin that is missing.
+issue_ref_json() {
+  local ref="$1" repo="$2" slug number
+  if [[ "$ref" =~ ^#([0-9]+)$ ]]; then
+    slug="$(github_slug "$repo")" || return 1
+    number="${BASH_REMATCH[1]}"
+  elif [[ "$ref" =~ ^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)$ ]]; then
+    slug="${BASH_REMATCH[1]}"
+    number="${BASH_REMATCH[2]}"
+  elif [[ "$ref" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/([0-9]+)$ ]]; then
+    slug="${BASH_REMATCH[1]}"
+    number="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+  [[ "$number" =~ ^[1-9][0-9]*$ ]] || return 1
+  jq -cn --arg repo "$slug" --argjson number "$number" '{repo: $repo, number: $number}'
+}
+
 # latest_job_meta: print the meta.json of this repository's newest job (job IDs sort by time).
 # Returns 1 outside a git repository or when no job of this repository exists.
 latest_job_meta() {
