@@ -1,0 +1,50 @@
+# foreman-relay.yml
+#
+# 対象リポジトリ（例: Q0tzly/subcon）の .github/workflows/foreman-relay.yml に配置する
+# relay ワークフローのテンプレート。
+#
+# 仕様:
+# - issue に approved ラベルが付与されたときのみ repository_dispatch を送信します。
+# - v0 では中継先 foreman のリポジトリ名 (Q0tzly/foreman) はリテラルで記述しています。
+# - 送信には対象リポジトリの Actions Secrets に登録された FOREMAN_DISPATCH_TOKEN を使用します。
+
+name: foreman-relay
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  relay:
+    if: github.event.label.name == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Relay approved label to foreman
+        env:
+          FOREMAN_DISPATCH_TOKEN: ${{ secrets.FOREMAN_DISPATCH_TOKEN }}
+          EVENT_REPO: ${{ github.repository }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          EVENT_ACTOR: ${{ github.event.sender.login }}
+        run: |
+          jq -n \
+            --arg repo "$EVENT_REPO" \
+            --argjson issue "$EVENT_ISSUE" \
+            --arg label "$EVENT_LABEL" \
+            --arg actor "$EVENT_ACTOR" \
+            '{
+              event_type: "foreman-label",
+              client_payload: {
+                repo: $repo,
+                issue: $issue,
+                label: $label,
+                actor: $actor
+              }
+            }' | curl -fsSL -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $FOREMAN_DISPATCH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/Q0tzly/foreman/dispatches \
+              --data-binary @-
