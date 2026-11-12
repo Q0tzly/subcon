@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget (all when none given).
+# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -955,6 +955,55 @@ test_commit_twice() {
   SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: again" "$ID"
   assert_rc 1 || return 1
   assert_eq "$(git rev-parse HEAD)" "$before" head_unchanged
+}
+
+# ---- checks (53) ---------------------------------------------------------
+
+# A job whose ticket declares OTHER.md while the fake change lands in
+# README.md, so the stored checks come out ok:false with README.md outside.
+outside_job() {
+  write_ticket docs/t/02-b.md OTHER.md
+  commit_all "add narrow ticket"
+  submit_one docs/t/02-b.md || return 1
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .checks.ok)" false checks.ok
+  assert_eq "$(result "$ID" -c .checks.outside_files)" '["README.md"]' outside
+}
+
+test_checks_recompute_after_ticket_fix() {
+  outside_job || return 1
+  write_ticket docs/t/02-b.md README.md
+  sub checks "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .ok)" true new-ok
+  assert_eq "$(result "$ID" .checks.ok)" true stored-ok
+  assert_match "$(result "$ID" .checks.recomputed_at)" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' recomputed_at
+  assert_eq "$(result "$ID" -c .checks.previous_checks.outside_files)" '["README.md"]' previous-outside
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+}
+
+test_checks_recompute_still_outside() {
+  outside_job || return 1
+  sub checks "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .ok)" false still-ok
+  assert_eq "$(result "$ID" -c .checks.previous_checks.outside_files)" '["README.md"]' previous-outside
+}
+
+test_checks_unknown() {
+  subx checks no-such-job-id
+  assert_rc 1 || return 1
+}
+
+test_checks_running() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=6
+  submit_one docs/t/01-a.md || return 1
+  subx checks "$ID"
+  assert_rc 1 || return 1
+  wait_done "$ID" || return 1
 }
 
 # ---- reject (24) ---------------------------------------------------------
@@ -2751,7 +2800,7 @@ test_budget_invalid_value() {
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
