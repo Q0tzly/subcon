@@ -781,6 +781,53 @@ test_commit_ok() {
   grep -q '"event":"committed"' "$(hist)" || fail "no committed event in history"
 }
 
+test_commit_closes_same_repo() {
+  git remote add origin git@github.com:Q0tzly/subcon.git
+  submit_one --issue "#7" docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  git log -1 --format=%B | grep -Fxq "Closes #7" \
+    || fail "no Closes line: $(git log -1 --format=%B)"
+}
+
+test_commit_closes_cross_repo() {
+  submit_one --issue "Q0tzly/other#12" docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  git log -1 --format=%B | grep -Fxq "Closes Q0tzly/other#12" \
+    || fail "no cross-repo Closes line: $(git log -1 --format=%B)"
+}
+
+test_commit_no_closes_without_issue() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  ! git log -1 --format=%B | grep -q "Closes" \
+    || fail "unexpected Closes line: $(git log -1 --format=%B)"
+}
+
+test_commit_closes_not_duplicated() {
+  git remote add origin git@github.com:Q0tzly/subcon.git
+  submit_one --issue "#7" docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change
+
+Closes #7" "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(git log -1 --format=%B | grep -c '^Closes #7$')" "1" closes-count
+}
+
 test_commit_edited() {
   submit_one docs/t/01-a.md || return 1
   wait_done "$ID" || return 1
