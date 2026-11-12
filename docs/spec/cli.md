@@ -11,9 +11,9 @@
 | コマンド | 動作 | stdout の形式 |
 | --- | --- | --- |
 | `subcon new <feature>/<NN-name>` | `docs/design/<feature>/<NN-name>.md` をテンプレートから生成する。既にファイルが存在する場合はエラー | 単体オブジェクト: `{"path": "..."}` |
-| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が同じリポジトリの実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない）。環境変数 `SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS` が設定されている場合、今月（UTC）の終了ジョブの合計トークン数または件数が上限以上なら、ジョブを 1 つも作らず終了コード 1 で失敗する（`run` も同じ。`resume` は対象外）。上限値が非負整数でなければ、処理を始めずに終了コード 1 で失敗する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
+| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] [--issue <ref>] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が同じリポジトリの実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない）。環境変数 `SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS` が設定されている場合、今月（UTC）の終了ジョブの合計トークン数または件数が上限以上なら、ジョブを 1 つも作らず終了コード 1 で失敗する（`run` も同じ。`resume` は対象外）。上限値が非負整数でなければ、処理を始めずに終了コード 1 で失敗する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
 | `subcon wait [--timeout SEC] <id>...` | 指定した全ジョブの完了を待機する | 配列: 各ジョブの結果オブジェクト `[{"v": 1, ...}, ...]` |
-| `subcon run [--runner R] [--model M] [--driver D] [--timeout T] <ticket>` | 票 1 枚を `submit` し、完了するまで `wait` する | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
+| `subcon run [--runner R] [--model M] [--driver D] [--timeout T] [--issue <ref>] <ticket>` | 票 1 枚を `submit` し、完了するまで `wait` する | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
 | `subcon resume [--timeout T] <id>` | 失敗したジョブを、元のジョブのドライバの会話履歴を引き継いで新しいジョブとして再開する | 配列: `[{"ticket": "...", "id": "..."|"null", "resume_of": "...", "error": "..."|"null"}]` |
 | `subcon show <id>` | 指定したジョブの結果を表示する。実行中の場合は `state` だけが埋まった結果を返す | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
 | `subcon list [--all]` | 現在のリポジトリのジョブ一覧を表示する。`--all` を指定した場合は全リポジトリのジョブを対象とする（表示のみ） | 配列: `[{"id": "...", "repo": "...", "ticket": "...", "state": "...", "status": "..."|"null", "created_at": "..."}]`（作成日時の降順） |
@@ -93,6 +93,7 @@
 - `--model M`: 選択したドライバに渡すモデル ID を指定する。既定値は環境変数 `SUBCON_MODEL` の値、未設定時はドライバごとの既定モデル（`trailer` でドライバを直近ジョブから引いた場合は、そのジョブのモデル。`--driver` / `SUBCON_DRIVER` を指定した場合は引かない）（`agy`: `gemini-3.8-flash-medium`、`claude`: `claude-haiku-5-5`）。
 - `--timeout T`（`submit` / `run` / `resume`）: ドライバに渡すタイムアウト文字列（例: `30m`, `540s`）。既定値は `30m`（`resume` で省略時は再開元ジョブの設定値を引き継ぐ）。
 - `--timeout SEC`（`wait`）: 待機する秒数（整数）。既定値は `0`（無期限）。指定秒数が経過しても完了していないジョブがある場合、その時点の結果（未終了ジョブは `state: queued` または `running`）を出力して終了コード 5 で終了する（ジョブ自体は停止させない）。
+- `--issue <ref>`（`submit` / `run`）: 票の発生元 issue への参照を指定する。受理する形式は `#123`（カレントリポジトリの origin リモートが GitHub の場合）、`owner/repo#123`、および `https://github.com/owner/repo/issues/123`。番号は 1 以上の整数でなければならない。形式不正や origin が取得できない場合はエラーとなり、ジョブは作成されない。`resume` で作られる新ジョブは元ジョブの issue を引き継ぐ。
 
 ## 利用者向け環境変数
 

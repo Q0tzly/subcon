@@ -27,16 +27,18 @@ job_result() {
   fi
 
   if [[ "$state" == "queued" || "$state" == "running" ]]; then
-    local repo="" ticket=""
+    local repo="" ticket="" issue="null"
     if [[ -f "$dir/meta.json" ]]; then
       repo="$(jq -r .repo "$dir/meta.json" 2>/dev/null || echo "")"
       ticket="$(jq -r .ticket "$dir/meta.json" 2>/dev/null || echo "")"
+      issue="$(jq -c '.issue // null' "$dir/meta.json" 2>/dev/null || echo "null")"
     fi
     jq -cn \
       --arg id "$id" \
       --arg repo "$repo" \
       --arg ticket "$ticket" \
       --arg state "$state" \
+      --argjson issue "$issue" \
       '{
         v: 1,
         id: $id,
@@ -50,7 +52,8 @@ job_result() {
         diffstat: null,
         error: null,
         agy_error: null,
-        conversation: null
+        conversation: null,
+        issue: $issue
       }'
   else
     if [[ -f "$dir/result.json" ]]; then
@@ -180,7 +183,7 @@ cmd_run() {
   local pass_args=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --runner|--model|--driver|--timeout)
+      --runner|--model|--driver|--timeout|--issue)
         [[ $# -ge 2 ]] || die "$1 requires a value"
         pass_args+=("$1" "$2")
         shift 2

@@ -5,6 +5,8 @@ cmd_submit() {
   local driver="${SUBCON_DRIVER:-agy}"
   local model=""
   local timeout="$SUBCON_DEFAULT_TIMEOUT"
+  local issue_raw=""
+  local issue_set=0
   local tickets=()
 
   while [[ $# -gt 0 ]]; do
@@ -27,6 +29,12 @@ cmd_submit() {
       --timeout)
         [[ $# -ge 2 ]] || die "--timeout requires a value"
         timeout="$2"
+        shift 2
+        ;;
+      --issue)
+        [[ $# -ge 2 ]] || die "--issue requires a value"
+        issue_raw="$2"
+        issue_set=1
         shift 2
         ;;
       -*)
@@ -68,6 +76,11 @@ cmd_submit() {
 
   local repo
   repo="$(repo_top)"
+
+  local issue_json=""
+  if [[ $issue_set -eq 1 ]]; then
+    issue_json="$(issue_ref_json "$issue_raw" "$repo")" || die "invalid issue reference: $issue_raw"
+  fi
 
   if [[ "$runner" == "ci" ]]; then
     require_ci "$repo"
@@ -113,7 +126,7 @@ cmd_submit() {
 
   # Step 3: For each ticket, create the job and launch its runner in the background.
   for t in "${tickets[@]}"; do
-    if job_create "$repo" "$t" "$base" "$runner" "$model" "$timeout" "" "$driver"; then
+    if job_create "$repo" "$t" "$base" "$runner" "$model" "$timeout" "" "$driver" "$issue_json"; then
       job_warn_overlap "$JOB_ID" "$t" "$repo"
       submit_results+=("$(json_out '{ticket: $t, id: $id, error: null}' --arg t "$t" --arg id "$JOB_ID")")
     else
@@ -170,14 +183,14 @@ job_warn_overlap() {
   done
 }
 
-# job_create <repo> <ticket> <base> <runner> <model> <timeout> <from-job-dir> <driver>
+# job_create <repo> <ticket> <base> <runner> <model> <timeout> <from-job-dir> <driver> [issue-json]
 # Creates a job directory with its worktree and starts the runner in the background.
 # Sets JOB_ID on success and JOB_ERR on failure (nothing is left behind on failure).
 # With <from-job-dir> (resume), the ticket and the carried-over patch come from that
 # job instead of HEAD, and meta.json records resume_of and the conversation to continue.
 # An empty <driver> means agy (jobs created before drivers existed).
 job_create() {
-  local repo="$1" rel_ticket="$2" base="$3" runner="$4" model="$5" timeout="$6" from_dir="${7:-}" driver="${8:-agy}"
+  local repo="$1" rel_ticket="$2" base="$3" runner="$4" model="$5" timeout="$6" from_dir="${7:-}" driver="${8:-agy}" issue_json="${9:-}"
   JOB_ID="" JOB_ERR=""
 
   local ticket_base
@@ -213,10 +226,12 @@ job_create() {
   if [[ -n "$from_dir" ]]; then
     resume_of="$(jq -r .id "$from_dir/meta.json")"
     conversation="$(jq -r '.conversation // empty' "$from_dir/result.json")"
+    issue_json="$(jq -c '.issue // empty' "$from_dir/meta.json" 2>/dev/null || echo "")"
   fi
 
   if ! json_out '{v: 1, id: $id, repo: $repo, ticket: $ticket, base: $base, runner: $runner, driver: $driver, model: $model, timeout: $timeout, created_at: $created_at}
-      + (if $resume_of == "" then {} else {resume_of: $resume_of, conversation: $conversation} end)' \
+      + (if $resume_of == "" then {} else {resume_of: $resume_of, conversation: $conversation} end)
+      + (if $issue == "" then {} else {issue: ($issue | fromjson)} end)' \
     --arg id "$job_id" \
     --arg repo "$repo" \
     --arg ticket "$rel_ticket" \
@@ -227,7 +242,8 @@ job_create() {
     --arg timeout "$timeout" \
     --arg created_at "$created_at" \
     --arg resume_of "$resume_of" \
-    --arg conversation "$conversation" | atomic_write "$job_path/meta.json"; then
+    --arg conversation "$conversation" \
+    --arg issue "$issue_json" | atomic_write "$job_path/meta.json"; then
     err_msg="failed to write meta.json"
   fi
 
@@ -434,11 +450,14 @@ job_finalize() {
     return 0
   fi
 
-  local id repo ticket base
+  local id repo ticket base issue="null"
   id="$(jq -r .id "$job_dir/meta.json")"
   repo="$(jq -r .repo "$job_dir/meta.json")"
   ticket="$(jq -r .ticket "$job_dir/meta.json")"
   base="$(jq -r .base "$job_dir/meta.json")"
+  if [[ -f "$job_dir/meta.json" ]]; then
+    issue="$(jq -c '.issue // null' "$job_dir/meta.json" 2>/dev/null || echo "null")"
+  fi
 
   local work_dir="$job_dir/work"
   local has_patch=0
@@ -526,6 +545,7 @@ job_finalize() {
     --arg diffstat "$diffstat" \
     --argjson checks "$checks" \
     --argjson report "$report" \
+    --argjson issue "$issue" \
     '{
       v: 1,
       id: $id,
@@ -539,7 +559,8 @@ job_finalize() {
       diffstat: (if $has_patch == "1" then $diffstat else null end),
       error: (if $error == "" then null else $error end),
       agy_error: (if $agy_error == "" then null else $agy_error end),
-      conversation: (if $conversation == "" then null else $conversation end)
+      conversation: (if $conversation == "" then null else $conversation end),
+      issue: $issue
     }' | atomic_write "$job_dir/result.json"
 
   # Before the state update, so a finished state implies the history line exists.

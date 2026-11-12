@@ -66,6 +66,7 @@
 - `model`: 使用したモデル ID（文字列、例: `"gemini-3.8-flash-medium"`）。
 - `timeout`: ジョブに指定されたタイムアウト時間（文字列、例: `"30m"`）。
 - `created_at`: ジョブの作成時刻（ISO 8601 UTC 文字列）。
+- `issue`: 発生元 issue の参照オブジェクト（`{"repo": "owner/repo", "number": <整数>}`）。`--issue` で指定された場合、または `resume` で元ジョブから引き継がれた場合にのみ存在し、指定がないジョブの `meta.json` にはキー自体が存在しない。
 
 ### resume 時の追加フィールド
 
@@ -113,7 +114,11 @@
   "diffstat": "1 file changed, 20 insertions(+)",
   "error": null,
   "agy_error": null,
-  "conversation": "c4d3b2a1-..."
+  "conversation": "c4d3b2a1-...",
+  "issue": {
+    "repo": "owner/repo",
+    "number": 123
+  }
 }
 ```
 
@@ -134,10 +139,11 @@
 - `error`: ジョブ失敗時のエラー理由（文字列、正常終了時は `null`）。
 - `agy_error`: agy が出力したエラー情報（文字列または JSON 文字列、無ければ `null`）。
 - `conversation`: agy が出力した会話 ID（文字列、無ければ `null`）。再開（`resume`）時に使用される。
+- `issue`: 発生元 issue の参照オブジェクト（`{"repo": "owner/repo", "number": <整数>}`）、または `null`。
 
 ### 実行中ジョブの規則
 
-ジョブが実行中（`state` が `"queued"` または `"running"`）に `subcon show` や `subcon wait`（タイムアウト時）によって参照された場合、`v`, `id`, `repo`, `ticket`, `state` のみが設定され、それ以外のすべてのフィールドは `null` となる。
+ジョブが実行中（`state` が `"queued"` または `"running"`）に `subcon show` や `subcon wait`（タイムアウト時）によって参照された場合、`v`, `id`, `repo`, `ticket`, `state` のほか、`issue`（meta に記録されたオブジェクト、無ければ `null`）が設定され、それ以外のすべてのフィールドは `null` となる。
 
 ## history.jsonl
 
