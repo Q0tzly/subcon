@@ -20,7 +20,7 @@
 | `subcon diff <id>` | ジョブの `patch.diff` をそのまま出力する | テキスト: Unified diff 形式（パッチテキスト） |
 | `subcon log <id>` | ジョブの実行ログ（ジョブディレクトリの `log` ファイル）をそのまま出力する。実行中のジョブでも読める | テキスト: ログテキスト |
 | `subcon apply <id>` | ジョブのパッチを現在の作業ツリーに適用する（インデックスは触らず、コミットはしない） | 単体オブジェクト: `{"id": "...", "applied": true}` |
-| `subcon commit -m <message> [--edited] <id>` | 検収済みの変更をステージングし、trailer（`Co-Authored-By` / `Reviewed-By`）を付与してコミットする | 単体オブジェクト: `{"id": "...", "commit": "<hash>"}` |
+| `subcon commit -m <message> [--edited] <id>` | 検収済みの変更をステージングし、trailer（`Co-Authored-By` / `Reviewed-By`、および issue 参照がある場合は `Closes`）を付与してコミットする | 単体オブジェクト: `{"id": "...", "commit": "<hash>"}` |
 | `subcon reject -m <reason> [--model M] [--runner R] <id>` | 差し戻し理由を票の `## Notes` に追記してコミットし、同一票を再委任する | 単体オブジェクト: `{"id": "..."|"null", "reject_of": "...", "ticket": "...", "error": "..."|"null"}` |
 | `subcon discard <id>...` | 指定したジョブの作業領域およびジョブディレクトリを削除する。実行中のプロセスは停止させる | 単体オブジェクト: `{"discarded": ["<id>", ...]}` |
 | `subcon stats [--all] [--since <N>d\|<N>h] [--text]` | 履歴ファイル（`history.jsonl`）を集計して統計を出力する | 単体オブジェクト: 集計 JSON（`--text` 指定時は人間向けのテキスト表） |
@@ -33,6 +33,16 @@
 ### reject の委任上限
 
 同一リポジトリ・同一票に対する初回委任は最大で 3 件まで。`resume` 由来のジョブは数えない。上限到達時の `reject` は終了コード 1 で失敗し、票・履歴・git のいずれも変更しない。
+
+### commit 時の Closes 行の自動付記
+
+ジョブの `meta.json` に `issue: {"repo": "owner/repo", "number": N}` がある場合のみ、コミットメッセージのフッタ（トレーラ群）の最後に `Closes` 行を 1 行足す。メタデータに issue 参照が無い場合は何も足さない。
+
+- **行の形式**: issue の repo とカレント repo の GitHub スラッグ（`origin` リモートの URL から導出）の一致で決める:
+  - 一致する: `Closes #N`
+  - 一致しない、またはスラッグが導出できない（`origin` が無い・GitHub でない）: `Closes owner/repo#N`
+- **重複防止**: ユーザーの `-m` メッセージに既に `Closes #N` または `Closes owner/repo#N` が含まれている場合は追加しない。
+- **異なる repo の issue を指す場合の意味**: `Closes owner/repo#N` は、そのコミットが issue のある repo のデフォルトブランチに届いた場合にだけ GitHub が自動で閉じる。それ以外の場合は参照リンクとして働く。subcon のジョブは自分の repo にコミットするので、異なる repo の issue は通常は閉じない（foreman 側で PR を作る際の手がかりになる）。
 
 ## 出力の原則
 

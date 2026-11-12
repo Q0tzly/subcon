@@ -334,6 +334,26 @@ Co-Authored-By: $SUBCON_REVIEWER"
   commit_msg="$commit_msg
 Reviewed-By: $SUBCON_REVIEWER"
 
+  local issue_repo issue_num
+  issue_repo="$(jq -r '.issue.repo // empty' "$dir/meta.json" 2>/dev/null || echo "")"
+  issue_num="$(jq -r '.issue.number // empty' "$dir/meta.json" 2>/dev/null || echo "")"
+  if [[ -n "$issue_repo" && -n "$issue_num" ]]; then
+    local closes_target
+    local cur_slug
+    cur_slug="$(github_slug "$cur_repo" 2>/dev/null || echo "")"
+    if [[ -n "$cur_slug" && "$cur_slug" == "$issue_repo" ]]; then
+      closes_target="Closes #$issue_num"
+    else
+      closes_target="Closes $issue_repo#$issue_num"
+    fi
+
+    local dup_pattern="(^|[^A-Za-z0-9_])Closes (#${issue_num}|${issue_repo}#${issue_num})([^0-9]|$)"
+    if ! [[ "$message" =~ $dup_pattern ]]; then
+      commit_msg="$commit_msg
+$closes_target"
+    fi
+  fi
+
   if ! git -C "$cur_repo" commit -q -m "$commit_msg" >/dev/null; then
     echo "subcon: commit failed" >&2
     return 1
