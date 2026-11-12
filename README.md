@@ -77,6 +77,13 @@ subcon submit --runner ci <ticket>...
 dotfiles を入れていれば、`ai/AGENTS.md` が `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`、Muse の `~/AGENTS.md` にリンクされるので指示も届く。dotfiles から入れるなら `install.sh --subcon`。
 スキルは `subcon guide` を読んでから委任する入口で、手順そのものは `docs/delegation.md` に一本化している。
 
+## foreman 連携
+
+[foreman](https://github.com/Q0tzly/foreman) と連携することで、GitHub Issue を起点とした issue 駆動の開発フローを運用できます。
+
+- フロー: `auto` → 下書き → `approved` → intake 検証 → mini で subcon 実行 → Draft PR
+- 詳細は [Q0tzly/foreman の docs/DESIGN.md](https://github.com/Q0tzly/foreman/blob/main/docs/DESIGN.md) を参照。
+
 ## 開発
 
 ```sh
