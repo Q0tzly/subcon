@@ -3,10 +3,14 @@
 # Usage: drivers/opencode <job-dir>. The caller (a runner) has already cd'd into work/.
 set -euo pipefail
 
+if ! command -v opencode >/dev/null 2>&1 && [[ -n "${HOME:-}" && -x "$HOME/.opencode/bin/opencode" ]]; then
+  export PATH="$HOME/.opencode/bin${PATH:+:$PATH}"
+fi
+
 case "${1:-}" in
   preflight)
     if ! command -v opencode >/dev/null 2>&1; then
-      echo "opencode not found: install OpenCode and make sure it is on PATH" >&2
+      echo "opencode not found: install OpenCode and make sure it is on PATH or at ~/.opencode/bin/opencode" >&2
       exit 1
     fi
     exit 0
