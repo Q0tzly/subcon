@@ -1047,6 +1047,24 @@ test_history_survives_discard() {
   assert_eq "$(jq -r .id "$(hist)")" "$id" "line kept"
 }
 
+test_history_cost_recorded() {
+  local fc
+  fc="$(fake_claude_path)"
+  PATH="$fc:$PATH" sub run --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  local l
+  l="$(hline 1)"
+  assert_eq "$(jq -r .cost_usd <<<"$l")" "0.01" cost_usd
+}
+
+test_history_cost_absent_null() {
+  sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  local l
+  l="$(hline 1)"
+  assert_eq "$(jq -r .cost_usd <<<"$l")" "null" cost_usd
+}
+
 test_history_applied_event() {
   sub run docs/t/01-a.md
   local id
@@ -1107,12 +1125,14 @@ hjob() {
   fi
   jq -cn --arg id "$1" --arg repo "$2" --arg model "$3" --arg state "$4" --arg created "$created" \
     --argjson status "$( [[ $5 == null ]] && echo null || echo "\"$5\"")" \
-    --argjson ok "$6" --argjson dur "$7" --argjson tin "$8" --argjson tout "$9" --arg drv "${11:-}" '
+    --argjson ok "$6" --argjson dur "$7" --argjson tin "$8" --argjson tout "$9" --arg drv "${11:-}" \
+    --arg cst "${12:-}" '
     {type: "job", id: $id, repo: $repo, ticket: "docs/t/x.md", model: $model, runner: "local",
      created_at: $created, finished_at: $created, duration_s: $dur, state: $state, status: $status,
      checks_ok: $ok, files_changed: 1, insertions: 1, deletions: 0,
      tokens: (if $tin == null then null else {input: $tin, output: $tout, total: ($tin + $tout), cache_read: 5, thinking: 2} end),
-     resume_of: null} + (if $drv == "" then {} else {driver: $drv} end)' >> "$(hist)"
+     resume_of: null} + (if $drv == "" then {} else {driver: $drv} end)
+     + (if $cst == "" then {} else {cost_usd: ($cst | tonumber)} end)' >> "$(hist)"
 }
 hevent() { jq -cn --arg id "$1" '{type: "event", id: $id, event: "applied", at: "2026-01-01T00:00:00Z"}' >> "$(hist)"; }
 
@@ -1155,6 +1175,22 @@ test_stats_counts() {
   assert_eq "$(jget -c .tokens)" '{"input":128,"output":32,"total":160,"cache_read":15,"thinking":6}' tokens
   assert_eq "$(jget -c .by_model.m1)" '{"jobs":2,"success":1,"applied":1,"tokens_total":150}' m1
   assert_eq "$(jget -c .by_model.m2)" '{"jobs":2,"success":0,"applied":1,"tokens_total":10}' m2
+}
+
+test_stats_cost() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20 0 "" 0.5
+  hjob B "$TOP" m1 finished done true 10 80 20 0 "" 0.25
+  hjob C "$TOP" m1 finished done true 10 80 20
+  sub stats
+  assert_rc 0 || return 1
+  assert_eq "$(jget .cost.usd)" "0.75" cost.usd
+  assert_eq "$(jget .cost.priced_jobs)" "2" priced_jobs
+  assert_eq "$(jget .cost.unpriced_jobs)" "1" unpriced_jobs
+  sub stats --text
+  assert_rc 0 || return 1
+  grep -q "Cost:" <<<"$OUT" || fail "text output lacks the Cost line: $OUT"
+  grep -q "0.75" <<<"$OUT" || fail "text output lacks the cost total: $OUT"
 }
 
 test_stats_by_driver() {

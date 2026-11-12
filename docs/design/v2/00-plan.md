@@ -49,6 +49,8 @@
 | 45 | 実行中ジョブとの `## Files` 重なり警告（submit / run、ブロックしない） | Haiku（予備 Flash） | `lib/job.sh` `docs/spec/cli.md` |
 | 46 | 単一マシン向け簡易予算キャップ（`SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS`、月次・履歴集計） | Haiku（予備 Flash） | `lib/job.sh` `lib/history.sh` `docs/spec/cli.md` |
 | 47 | 重なり警告のリポジトリ絞り込み（票45 の追補: 状態ディレクトリは全 repo 共有で相対パス比較が偽陽性を出すため） | Haiku（予備 Flash） | `lib/job.sh` `docs/spec/cli.md` |
+| 48 | 履歴への `cost_usd` 記録と stats の priced / unpriced 集計（issue #2 の前段） | Haiku（予備 Flash） | `lib/history.sh` `lib/stats.sh` `docs/spec/files.md` |
+| 49 | `subcon export` の新設とメタデータ形式の固定（issue #2 の本体） | Haiku（予備 Flash） | `bin/subcon` `lib/export.sh` `docs/spec/cli.md` `docs/spec/files.md` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
