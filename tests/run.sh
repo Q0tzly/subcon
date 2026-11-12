@@ -1429,6 +1429,9 @@ test_driver_trailer_latest_job() {
   subx trailer
   assert_rc 0 || return 1
   assert_match "$OUT" 'Fake Model One' trailer
+  # Job IDs sort by second-resolution timestamp, so cross a second boundary
+  # before creating the next job (otherwise "latest" is ambiguous).
+  sleep 2
   sub run docs/t/01-a.md
   assert_rc 0 || return 1
   subx trailer
