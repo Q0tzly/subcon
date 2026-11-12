@@ -95,14 +95,19 @@ clean_path() {
   printf '%s' "$p"
 }
 
-# preflight_home <with-agy|no-agy>: a throwaway HOME; with-agy puts the fake
-# agy at $HOME/.local/bin/agy (and nowhere on PATH).
+# preflight_home <with-agy|no-agy|with-claude>: a throwaway HOME; with-agy
+# puts the fake agy at $HOME/.local/bin/agy (and nowhere on PATH);
+# with-claude does the same for the fake claude.
 preflight_home() {
   local h="$T/home-$1"
   mkdir -p "$h"
   if [[ "$1" == with-agy ]]; then
     mkdir -p "$h/.local/bin"
     ln -s "$ROOT/tests/fake-agy" "$h/.local/bin/agy"
+  fi
+  if [[ "$1" == with-claude ]]; then
+    mkdir -p "$h/.local/bin"
+    ln -s "$ROOT/tests/fake-claude" "$h/.local/bin/claude"
   fi
   printf '%s' "$h"
 }
@@ -1257,7 +1262,7 @@ test_resume_history() {
   assert_eq "$(jq -r --arg id "$new" 'select(.type == "job" and .id == $id) | .resume_of' "$SUBCON_STATE/history.jsonl")" "$ID" resume_of
 }
 
-# ---- driver (34) -----------------------------------------------------------
+# ---- driver (35) -----------------------------------------------------------
 
 # Copy the subcon tree to $SX with an extra fake driver installed, so
 # driver-selection tests never touch the real tree.
@@ -1455,6 +1460,19 @@ test_driver_claude_preflight_missing() {
   assert_eq "$(jobcount)" 0 jobs
 }
 
+test_driver_claude_preflight_homebin() {
+  make_driver_tree
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home with-claude)"
+  HOME="$h" PATH="$cp" subx submit --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .checks.ok)" true checks.ok
+}
+
 test_driver_opencode_ok() {
   make_driver_tree
   local oc
@@ -1603,7 +1621,7 @@ test_driver_opencode_custom_model_trailer() {
   assert_match "$OUT" '^Co-Authored-By: sakura/custom-model-x <[^>]+>$' trailer
 }
 
-# ---- preflight (14) --------------------------------------------------------
+# ---- preflight (15) --------------------------------------------------------
 
 test_preflight_missing_submit() {
   local cp h
@@ -1644,6 +1662,20 @@ test_preflight_fallback_run() {
   HOME="$h" PATH="$cp" sub trailer
   assert_rc 0 || return 1
   assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
+}
+
+test_preflight_claude_fallback_run() {
+  make_driver_tree
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home with-claude)"
+  HOME="$h" PATH="$cp" subx run --driver claude docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jget .state)" finished state
+  assert_eq "$(jget .status)" done status
+  HOME="$h" PATH="$cp" subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Claude Haiku 5\.5' trailer
 }
 
 # ---- authwarn (15) ---------------------------------------------------------
