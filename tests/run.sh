@@ -1381,13 +1381,13 @@ failed_job() {
 
 test_resume_issue_inherited() {
   git remote add origin git@github.com:Q0tzly/subcon.git
-  sub run --issue "#9" docs/t/01-a.md
-  assert_rc 0 || return 1
-  local old new
-  old="$(jget .id)"
+  FAKE_AGY_MODE=error submit_one --issue "#9" docs/t/01-a.md || return 1
+  local old="$ID" new
+  wait_done "$old" || return 1
   sub resume "$old"
   assert_rc 0 || return 1
   new="$(jget '.[0].id')"
+  wait_done "$new" || return 1
   assert_eq "$(jq -c .issue "$(jobdir "$new")/meta.json")" '{"repo":"Q0tzly/subcon","number":9}' meta.issue
 }
 
