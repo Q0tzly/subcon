@@ -11,7 +11,7 @@
 | コマンド | 動作 | stdout の形式 |
 | --- | --- | --- |
 | `subcon new <feature>/<NN-name>` | `docs/design/<feature>/<NN-name>.md` をテンプレートから生成する。既にファイルが存在する場合はエラー | 単体オブジェクト: `{"path": "..."}` |
-| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない）。環境変数 `SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS` が設定されている場合、今月（UTC）の終了ジョブの合計トークン数または件数が上限以上なら、ジョブを 1 つも作らず終了コード 1 で失敗する（`run` も同じ。`resume` は対象外）。上限値が非負整数でなければ、処理を始めずに終了コード 1 で失敗する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
+| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が同じリポジトリの実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない）。環境変数 `SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS` が設定されている場合、今月（UTC）の終了ジョブの合計トークン数または件数が上限以上なら、ジョブを 1 つも作らず終了コード 1 で失敗する（`run` も同じ。`resume` は対象外）。上限値が非負整数でなければ、処理を始めずに終了コード 1 で失敗する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
 | `subcon wait [--timeout SEC] <id>...` | 指定した全ジョブの完了を待機する | 配列: 各ジョブの結果オブジェクト `[{"v": 1, ...}, ...]` |
 | `subcon run [--runner R] [--model M] [--driver D] [--timeout T] <ticket>` | 票 1 枚を `submit` し、完了するまで `wait` する | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
 | `subcon resume [--timeout T] <id>` | 失敗したジョブを、元のジョブのドライバの会話履歴を引き継いで新しいジョブとして再開する | 配列: `[{"ticket": "...", "id": "..."|"null", "resume_of": "...", "error": "..."|"null"}]` |

@@ -114,7 +114,7 @@ cmd_submit() {
   # Step 3: For each ticket, create the job and launch its runner in the background.
   for t in "${tickets[@]}"; do
     if job_create "$repo" "$t" "$base" "$runner" "$model" "$timeout" "" "$driver"; then
-      job_warn_overlap "$JOB_ID" "$t"
+      job_warn_overlap "$JOB_ID" "$t" "$repo"
       submit_results+=("$(json_out '{ticket: $t, id: $id, error: null}' --arg t "$t" --arg id "$JOB_ID")")
     else
       submit_results+=("$(json_out '{ticket: $t, id: null, error: $err}' --arg t "$t" --arg err "$JOB_ERR")")
@@ -131,12 +131,14 @@ cmd_submit() {
   return 0
 }
 
-# job_warn_overlap <job-id> <ticket>
-# Warns on stderr for each queued/running job (other than <job-id>) whose ## Files
-# share a path with the ticket. Advisory only: never changes the exit status.
+# job_warn_overlap <job-id> <ticket> <repo>
+# Warns on stderr for each queued/running job (other than <job-id>) in <repo> whose
+# ## Files share a path with the ticket. Paths are repo-relative, so jobs from other
+# repositories are skipped; a job whose meta.json is unreadable or has no repo is skipped too.
+# Advisory only: never changes the exit status.
 job_warn_overlap() {
-  local id="$1" rel_ticket="$2"
-  local own_files other_dir other other_state other_files common f
+  local id="$1" rel_ticket="$2" repo="$3"
+  local own_files other_dir other other_state other_repo other_files common f
 
   own_files="$(ticket_files "$(job_dir "$id")/ticket.md")"
 
@@ -149,6 +151,8 @@ job_warn_overlap() {
     if [[ "$other_state" != queued && "$other_state" != running ]]; then
       continue
     fi
+    other_repo="$(jq -r '.repo // empty' "$other_dir/meta.json" 2>/dev/null || echo "")"
+    [[ "$other_repo" == "$repo" ]] || continue
     [[ -f "$other_dir/ticket.md" ]] || continue
     other_files="$(ticket_files "$other_dir/ticket.md")"
 
