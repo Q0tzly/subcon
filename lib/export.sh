@@ -1,5 +1,26 @@
 # Metadata export as JSON Lines for control planes (ticket 49). Format: docs/spec/files.md.
 
+_export_generate_source() {
+  local val=""
+  if [[ -c /dev/urandom ]]; then
+    if command -v od >/dev/null 2>&1; then
+      val="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -dc '0-9a-f')"
+    elif command -v hexdump >/dev/null 2>&1; then
+      val="$(hexdump -vn16 -e '16/1 "%02x"' /dev/urandom 2>/dev/null | tr -dc '0-9a-f')"
+    elif command -v openssl >/dev/null 2>&1; then
+      val="$(openssl rand -hex 16 2>/dev/null | tr -dc '0-9a-f')"
+    fi
+  fi
+  if [[ ! "$val" =~ ^[0-9a-f]{32}$ ]]; then
+    val="$(printf '%04x%04x%04x%04x%04x%04x%04x%04x' \
+      "$((RANDOM & 0xffff))" "$((RANDOM & 0xffff))" \
+      "$((RANDOM & 0xffff))" "$((RANDOM & 0xffff))" \
+      "$((RANDOM & 0xffff))" "$((RANDOM & 0xffff))" \
+      "$((RANDOM & 0xffff))" "$((RANDOM & 0xffff))")"
+  fi
+  echo "$val"
+}
+
 cmd_export() {
   local all=0
   local since_val=""
@@ -53,16 +74,30 @@ cmd_export() {
     all_json="true"
   fi
 
+  local sdir sfile source_val=""
+  sdir="$(state_root)"
+  sfile="$sdir/source"
+  if [[ -s "$sfile" ]]; then
+    source_val="$(tr -d '[:space:]' < "$sfile")"
+  fi
+  if [[ -z "$source_val" ]]; then
+    source_val="$(_export_generate_source)"
+    [[ -d "$sdir" ]] || mkdir -p "$sdir" || return 1
+    printf '%s\n' "$source_val" > "$sfile" || return 1
+  fi
+
   local exported_at
   exported_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   jq -cn \
+    --arg source "$source_val" \
     --arg exported_at "$exported_at" \
     --argjson all "$all_json" \
     --arg repo "$cur_repo" \
     '{
       type: "export",
       v: 1,
+      source: $source,
       exported_at: $exported_at,
       scope: (if $all then "all" else "repo" end),
       repo: (if $all then null else $repo end)

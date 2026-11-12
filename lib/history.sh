@@ -57,9 +57,17 @@ history_append_job() {
   local finished_at
   finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+  local slug=""
+  local meta_repo
+  meta_repo="$(jq -r '.repo // empty' "$meta_file")"
+  if [[ -n "$meta_repo" ]]; then
+    slug="$(github_slug "$meta_repo" 2>/dev/null || echo "")"
+  fi
+
   local line
   line="$(jq -cn \
     --arg finished_at "$finished_at" \
+    --arg repo_slug "$slug" \
     --argjson meta "$(< "$meta_file")" \
     --argjson result "$(< "$result_file")" \
     --argjson agy "$agy_json" \
@@ -68,6 +76,7 @@ history_append_job() {
       v: 1,
       id: $meta.id,
       repo: $meta.repo,
+      repo_slug: (if $repo_slug == "" then null else $repo_slug end),
       ticket: $meta.ticket,
       model: $meta.model,
       runner: $meta.runner,

@@ -170,6 +170,7 @@
   "v": 1,
   "id": "20261111-180000-01-parser-a1b2",
   "repo": "/path/to/repo",
+  "repo_slug": "owner/repo",
   "ticket": "docs/design/feat/01-parser.md",
   "model": "gemini-3.8-flash-medium",
   "runner": "local",
@@ -198,6 +199,7 @@
 - `type`: 固定値 `"job"`。
 - `v`: フォーマットのバージョン番号（整数: `1`）。
 - `id`, `repo`, `ticket`, `model`, `runner`, `created_at`, `state`, `status`: ジョブ情報。
+- `repo_slug`: 対象リポジトリ（`repo`）の origin リモートに対する `github_slug` の値（文字列、例: `"owner/repo"`。origin が GitHub URL でない場合や取得できない場合は `null`）。過去の履歴行にはキー自体が存在しない場合がある。
 - `driver`: 実行したドライバ名（`meta.json` の `driver` を写す。ドライバ記録の無い旧ジョブは `"agy"` として記録される）。
 - `finished_at`: ジョブ終了時刻（ISO 8601 UTC 文字列）。
 - `duration_s`: agy 出力の `duration_seconds`（数値、無ければ `null`）。
@@ -255,20 +257,37 @@
 ### エンベロープ（先頭 1 行）
 
 ```json
-{"type":"export","v":1,"exported_at":"2026-11-12T09:00:00Z","scope":"repo","repo":"/path/to/repo"}
+{"type":"export","v":1,"source":"0123456789abcdef0123456789abcdef","exported_at":"2026-11-12T09:00:00Z","scope":"repo","repo":"/path/to/repo"}
 ```
 
 - `type`: 固定値 `"export"`。
 - `v`: エクスポート形式の版（整数: `1`）。これはエクスポート形式そのものの版であり、個々の行（ジョブ行の `v` を含む）の版とは独立している。形式に破壊的変更が入ったときに上げる。
+- `source`: state root（`${SUBCON_STATE}`）の不透明 ID（文字列、128bit 乱数の hex 32 文字）。常に文字列として出力され、`null` にはならない。
 - `exported_at`: 出力時刻（ISO 8601 UTC 文字列）。
 - `scope`: 対象範囲（`repo` | `all`）。`--all` 指定時は `all`。
 - `repo`: 対象リポジトリの絶対パス（文字列）。`scope` が `all` の場合は `null`。
 
+#### source の生成と保存
+
+- 値: 128bit 乱数の hex 32 文字（例: `/dev/urandom` から 16 バイトを hex 化）。
+- 保存: state root 直下の `source` ファイル（`${SUBCON_STATE}/source`）に値だけを書く。
+- 生成: `subcon export` の実行時に、ファイルが存在しないか空の場合に生成して保存する。以後の export では保存値を使う。ジョブ記録時には生成しない。
+- 再生成: 手動等で `source` ファイルを削除すると、次回の export 時に新しい `source` が再生成される。
+
 ### ジョブ行（2 行目以降）
 
 - 履歴の `type == "job"` の行を、そのまま出す（整形はしない）。ジョブ行は「finalize 行」（`history.jsonl` のジョブ行）と同一であり、フィールドの意味は本書の `history.jsonl` の節に従う。
-- `type == "event"` の行は出力しない。
+- `type == "event"` の行は出力しない（event 行のエクスポートは v1 の非目標である。ジョブ単位のメトリクス集約に集中し、操作ログの集約は対象外とする）。
 - 対象範囲は `subcon stats` と同じ。既定は現在のリポジトリのジョブのみ、`--all` で全リポジトリ。`--since <N>d|<N>h` は `created_at` が cutoff 以降のジョブに絞る。
+
+### 跨機械での集約・重複除去仕様
+
+外部集約系（コントロールプレーン等）で複数マシンのエクスポートを集約する際の規約は以下のとおり:
+
+- **重複除去キー**: `(source, id)`。異なるマシン間や state root 間で同一 ID が衝突する可能性を排除し、レコードを一意に識別する。
+- **リポジトリ集約キー**: `repo_slug`。`repo_slug` が `null` のリポジトリは `(source, repo)` を集約キーとする。
+- **`cost_usd: null` の解釈**: `cost_usd: null` は「価格なし（未評価）」を意味し、コスト 0（`0`）とは異なる（stats 集計でも unpriced として扱われる）。
+- **時刻と順序**: `created_at` / `finished_at` は各マシンのローカル時計（UTC）で記録されるため、異なるマシン間を跨いだ厳密な時系列比較は保証されない。順序は `source` 単位で見ることを前提とする。
 
 ### 履歴が無い場合
 
