@@ -6,7 +6,7 @@
 
 ## コマンド一覧
 
-すべてのコマンドは git リポジトリ内で実行する（例外: `guide`、`trailer`、および `stats --all`）。
+すべてのコマンドは git リポジトリ内で実行する（例外: `guide`、`trailer`、`stats --all`、および `export --all`）。
 
 | コマンド | 動作 | stdout の形式 |
 | --- | --- | --- |
@@ -24,6 +24,7 @@
 | `subcon reject -m <reason> [--model M] [--runner R] <id>` | 差し戻し理由を票の `## Notes` に追記してコミットし、同一票を再委任する | 単体オブジェクト: `{"id": "..."|"null", "reject_of": "...", "ticket": "...", "error": "..."|"null"}` |
 | `subcon discard <id>...` | 指定したジョブの作業領域およびジョブディレクトリを削除する。実行中のプロセスは停止させる | 単体オブジェクト: `{"discarded": ["<id>", ...]}` |
 | `subcon stats [--all] [--since <N>d\|<N>h] [--text]` | 履歴ファイル（`history.jsonl`）を集計して統計を出力する | 単体オブジェクト: 集計 JSON（`--text` 指定時は人間向けのテキスト表） |
+| `subcon export [--all] [--since <N>d\|<N>h]` | 履歴ファイルのジョブ行をメタデータとして出力する（機械向けエクスポート）。先頭 1 行がエンベロープ、以降はジョブ行。既定は現在のリポジトリのジョブのみ、`--all` で全リポジトリ。`--since` は `created_at` が cutoff 以降のジョブに絞る。履歴が無い場合はエンベロープのみ | JSON Lines: 1 行目 `{"type": "export", ...}`、以降は履歴のジョブ行（形式は `docs/spec/files.md` の「エクスポート形式」） |
 | `subcon guide` | 委任ルール文書（`docs/delegation.md`）を表示する | テキスト: Markdown |
 | `subcon trailer [--model M] [--driver D]` | コミットメッセージに付与する `Co-Authored-By` 行を表示する。ドライバ・モデルは `--driver` / `--model` > 環境変数 `SUBCON_DRIVER`（モデルは `SUBCON_MODEL` も含む既定）> このリポジトリの直近ジョブ（ドライバとモデル）> `agy` の順に決める | テキスト: `Co-Authored-By: <Model Name> <email>` |
 
@@ -36,7 +37,7 @@
 ## 出力の原則
 
 - **標準出力 (stdout)**: 機械可読な JSON のみを出力する。
-  - 例外: `diff`（パッチテキスト）、`log`（ログテキスト）、`guide`（Markdown）、`trailer`（1 行テキスト）、`stats --text`（人間向けの集計表）。
+  - 例外: `diff`（パッチテキスト）、`log`（ログテキスト）、`guide`（Markdown）、`trailer`（1 行テキスト）、`stats --text`（人間向けの集計表）、`export`（JSON Lines。1 行ずつが JSON 値）。
 - **標準エラー出力 (stderr)**: 人間向けの進捗ログ、警告、エラーメッセージのみを出力する。
 - **配列と単体オブジェクトの原則**:
   - 複数ジョブを同時に扱うことができるコマンド（`submit`, `resume`, `wait`, `list`）は配列を出力する。

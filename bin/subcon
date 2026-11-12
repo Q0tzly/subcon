@@ -7,7 +7,7 @@ while [[ -L "$SELF" ]]; do SELF="$(readlink "$SELF")"; done
 SUBCON_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 export SUBCON_ROOT
 
-for f in common ticket job query manage history stats; do
+for f in common ticket job query manage history stats export; do
   # shellcheck source=/dev/null
   source "$SUBCON_ROOT/lib/$f.sh"
 done
@@ -28,6 +28,7 @@ usage: subcon new <feature>/<NN-name>
        subcon reject -m <reason> [--model M] [--runner R] <id>
        subcon discard <id>...
        subcon stats [--all] [--since <N>d|<N>h] [--text]
+       subcon export [--all] [--since <N>d|<N>h]
        subcon guide
        subcon trailer [--model M] [--driver D]
 
@@ -56,6 +57,7 @@ case "$cmd" in
   reject) cmd_reject "$@" ;;
   discard) cmd_discard "$@" ;;
   stats) cmd_stats "$@" ;;
+  export) cmd_export "$@" ;;
   trailer) cmd_trailer "$@" ;;
   __exec) job_exec "$@" ;;
   *) usage ;;
