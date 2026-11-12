@@ -49,6 +49,10 @@ foreman は issue から票を切る。票と issue の対応がジョブのメ�
 - 環境変数での指定（`SUBCON_ISSUE` 等）は入れない。
 - issue の実在確認（GitHub への問い合わせ）はしない。形式の検証のみ。
 
+## Notes
+
+- 進行状況（2026-11-12）: lib/common.sh のヘルパー（`github_slug`、`issue_ref_json`）は実装済みでコミット `8640115` に着地している。書き直さないこと。残りは lib/job.sh（`--issue` の配線・meta 記録・resume 引継ぎ）、lib/query.sh（表示）、docs/spec/cli.md、docs/spec/files.md。
+
 ## Acceptance
 
 - 受け入れテスト（tests/run.sh、監督が先行コミット済み）:
