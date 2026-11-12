@@ -506,6 +506,41 @@ test_submit_overlap_no_warn_finished() {
   wait_done "$b" || return 1
 }
 
+test_submit_issue_shorthand() {
+  git remote add origin git@github.com:Q0tzly/subcon.git
+  submit_one --issue "#7" docs/t/01-a.md || return 1
+  assert_eq "$(jq -c .issue "$(jobdir "$ID")/meta.json")" '{"repo":"Q0tzly/subcon","number":7}' meta.issue
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" -c .issue)" '{"repo":"Q0tzly/subcon","number":7}' result.issue
+}
+
+test_submit_issue_full() {
+  submit_one --issue "Q0tzly/other#12" docs/t/01-a.md || return 1
+  assert_eq "$(jq -c .issue "$(jobdir "$ID")/meta.json")" '{"repo":"Q0tzly/other","number":12}' meta.issue
+}
+
+test_submit_issue_url() {
+  submit_one --issue "https://github.com/Q0tzly/subcon/issues/34" docs/t/01-a.md || return 1
+  assert_eq "$(jq -c .issue "$(jobdir "$ID")/meta.json")" '{"repo":"Q0tzly/subcon","number":34}' meta.issue
+}
+
+test_submit_issue_invalid() {
+  subx submit --issue banana docs/t/01-a.md
+  assert_rc 1 || return 1
+  subx submit --issue "#0" docs/t/01-a.md
+  assert_rc 1 || return 1
+  subx submit --issue "#abc" docs/t/01-a.md
+  assert_rc 1 || return 1
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_submit_no_issue() {
+  submit_one docs/t/01-a.md || return 1
+  assert_eq "$(jq -r .issue "$(jobdir "$ID")/meta.json")" "null" meta.issue
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .issue)" "null" result.issue
+}
+
 # ---- query (05) ----------------------------------------------------------
 
 test_query_run_ok() {
@@ -1342,6 +1377,18 @@ test_export_bad_args() {
 failed_job() {
   FAKE_AGY_MODE=error submit_one docs/t/01-a.md || return 1
   wait_done "$ID" || return 1
+}
+
+test_resume_issue_inherited() {
+  git remote add origin git@github.com:Q0tzly/subcon.git
+  sub run --issue "#9" docs/t/01-a.md
+  assert_rc 0 || return 1
+  local old new
+  old="$(jget .id)"
+  sub resume "$old"
+  assert_rc 0 || return 1
+  new="$(jget '.[0].id')"
+  assert_eq "$(jq -c .issue "$(jobdir "$new")/meta.json")" '{"repo":"Q0tzly/subcon","number":9}' meta.issue
 }
 
 test_resume_records_conversation() {
