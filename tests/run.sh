@@ -11,7 +11,7 @@ ln -s "$ROOT/drivers/agy" "$FAKEBIN/subcon-driver-agy"
 ln -s "$ROOT/drivers/claude" "$FAKEBIN/subcon-driver-claude"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
-unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING SUBCON_REVIEWER SUBCON_BUDGET_TOKENS SUBCON_BUDGET_JOBS
+unset SUBCON_MODEL SUBCON_DRIVER SUBCON_JOB_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING SUBCON_REVIEWER SUBCON_BUDGET_TOKENS SUBCON_BUDGET_JOBS
 unset GEMINI_API_KEY ANTHROPIC_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL FAKE_GH_NO_AUTH FAKE_GH_FOREIGN_OWNER
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -1402,7 +1402,9 @@ test_driver_trailer_latest_job() {
   subx trailer
   assert_rc 0 || return 1
   assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
-  SUBCON_DRIVER=claude subx trailer
+  local fc
+  fc="$(fake_claude_path)"
+  SUBCON_DRIVER=claude PATH="$fc:$PATH" subx trailer
   assert_rc 0 || return 1
   assert_match "$OUT" 'Claude Haiku 5\.5' trailer
 }
