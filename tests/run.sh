@@ -608,9 +608,9 @@ test_query_wait_timeout_units() {
 test_query_wait_timeout_invalid() {
   submit_one docs/t/01-a.md || return 1
   wait_done "$ID" || return 1
-  subx wait --timeout 5x "$ID"
+  sub wait --timeout 5x "$ID"
   assert_rc 1 || return 1
-  subx wait --timeout abc "$ID"
+  sub wait --timeout abc "$ID"
   assert_rc 1 || return 1
 }
 
@@ -959,26 +959,26 @@ test_commit_twice() {
 
 # ---- checks (53) ---------------------------------------------------------
 
-# A job whose ticket declares OTHER.md while the fake change lands in
-# README.md, so the stored checks come out ok:false with README.md outside.
+# FAKE_AGY_MODE=outside changes the ticket's first Files entry (README.md)
+# and additionally creates outside.txt, so the stored checks come out
+# ok:false with outside.txt outside the declared scope.
 outside_job() {
-  write_ticket docs/t/02-b.md OTHER.md
-  commit_all "add narrow ticket"
-  submit_one docs/t/02-b.md || return 1
+  export FAKE_AGY_MODE=outside
+  submit_one docs/t/01-a.md || return 1
   wait_done "$ID" || return 1
   assert_eq "$(result "$ID" .checks.ok)" false checks.ok
-  assert_eq "$(result "$ID" -c .checks.outside_files)" '["README.md"]' outside
+  assert_eq "$(result "$ID" -c .checks.outside_files)" '["outside.txt"]' outside
 }
 
 test_checks_recompute_after_ticket_fix() {
   outside_job || return 1
-  write_ticket docs/t/02-b.md README.md
+  write_ticket docs/t/01-a.md README.md outside.txt
   sub checks "$ID"
   assert_rc 0 || return 1
   assert_eq "$(jget .ok)" true new-ok
   assert_eq "$(result "$ID" .checks.ok)" true stored-ok
   assert_match "$(result "$ID" .checks.recomputed_at)" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' recomputed_at
-  assert_eq "$(result "$ID" -c .checks.previous_checks.outside_files)" '["README.md"]' previous-outside
+  assert_eq "$(result "$ID" -c .checks.previous_checks.outside_files)" '["outside.txt"]' previous-outside
   sub apply "$ID"
   assert_rc 0 || return 1
   SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
@@ -990,18 +990,18 @@ test_checks_recompute_still_outside() {
   sub checks "$ID"
   assert_rc 0 || return 1
   assert_eq "$(jget .ok)" false still-ok
-  assert_eq "$(result "$ID" -c .checks.previous_checks.outside_files)" '["README.md"]' previous-outside
+  assert_eq "$(result "$ID" -c .checks.previous_checks.outside_files)" '["outside.txt"]' previous-outside
 }
 
 test_checks_unknown() {
-  subx checks no-such-job-id
+  sub checks no-such-job-id
   assert_rc 1 || return 1
 }
 
 test_checks_running() {
   export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=6
   submit_one docs/t/01-a.md || return 1
-  subx checks "$ID"
+  sub checks "$ID"
   assert_rc 1 || return 1
   wait_done "$ID" || return 1
 }
