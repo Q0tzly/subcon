@@ -44,6 +44,10 @@
 | 39 | `drivers/opencode` 本実装（改訂後の決定 A: プロンプト指示＋3段階抽出・検証、失敗時は報告なし完了。起動ウォッチドッグ、usage 写像、`model_name` フォールバック、`exit_code_for` の null→2 追従。設計は ../phase6-followups.md） | Haiku（予備 Flash） | `drivers/opencode` `lib/common.sh` `lib/query.sh` `docs/spec/cli.md` `README.md` |
 | 40 | 履歴・統計への `driver` 記録（`history.jsonl` に `driver`、`stats` に `by_driver`。Q10）と、会話 ID 保証の 2 段階の仕様明記（Q2） | Haiku（予備 Flash） | `lib/history.sh` `lib/stats.sh` `docs/spec/files.md` `docs/spec/backend.md` `docs/spec/runner.md` |
 | 42 | `drivers/claude` に agy と同じ `$HOME/.local/bin` フォールバック（票41 の CI 実機確認で発見した PATH 解決の非対称の解消） | Haiku（予備 Flash） | `drivers/claude` `docs/spec/runner.md` |
+| 43 | `subcon trailer` の既定を直近ジョブの driver / model にする（省略時に agy 固定だった帰属のズレ解消） | Haiku（予備 Flash） | `lib/common.sh` `docs/spec/cli.md` |
+| 44 | `drivers/opencode` に `$HOME/.opencode/bin` フォールバック（票42 と同種の PATH 解決） | Haiku（予備 Flash） | `drivers/opencode` `docs/spec/runner.md` |
+| 45 | 実行中ジョブとの `## Files` 重なり警告（submit / run、ブロックしない） | Haiku（予備 Flash） | `lib/job.sh` `docs/spec/cli.md` |
+| 46 | 単一マシン向け簡易予算キャップ（`SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS`、月次・履歴集計） | Haiku（予備 Flash） | `lib/job.sh` `lib/history.sh` `docs/spec/cli.md` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す

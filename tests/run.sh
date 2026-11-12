@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver (all when none given).
+# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver budget (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,7 +11,7 @@ ln -s "$ROOT/drivers/agy" "$FAKEBIN/subcon-driver-agy"
 ln -s "$ROOT/drivers/claude" "$FAKEBIN/subcon-driver-claude"
 export PATH="$FAKEBIN:$PATH"
 trap 'rm -rf "$FAKEBIN"' EXIT
-unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING SUBCON_REVIEWER
+unset SUBCON_MODEL FAKE_AGY_MODE FAKE_AGY_SLEEP FAKE_AGY_LOG SUBCON_NO_AUTH_WARNING SUBCON_REVIEWER SUBCON_BUDGET_TOKENS SUBCON_BUDGET_JOBS
 unset GEMINI_API_KEY ANTHROPIC_API_KEY SUBCON_CONTAINER_ENGINE SUBCON_CONTAINER_IMAGE FAKE_ENGINE_LOG FAKE_ENGINE_ENTRY FAKE_ENGINE_NO_IMAGE FAKE_GH_STATE FAKE_GH_CONCLUSION FAKE_GH_WORKSPACE FAKE_GH_SUBCON_ROOT SUBCON_CI_POLL FAKE_GH_NO_AUTH FAKE_GH_FOREIGN_OWNER
 # Keep tests independent of the user's git config (and readable inside agy's sandbox).
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -95,9 +95,10 @@ clean_path() {
   printf '%s' "$p"
 }
 
-# preflight_home <with-agy|no-agy|with-claude>: a throwaway HOME; with-agy
-# puts the fake agy at $HOME/.local/bin/agy (and nowhere on PATH);
-# with-claude does the same for the fake claude.
+# preflight_home <with-agy|no-agy|with-claude|with-opencode>: a throwaway
+# HOME; with-agy puts the fake agy at $HOME/.local/bin/agy (and nowhere on
+# PATH); with-claude does the same for the fake claude; with-opencode puts
+# the fake opencode at $HOME/.opencode/bin/opencode.
 preflight_home() {
   local h="$T/home-$1"
   mkdir -p "$h"
@@ -108,6 +109,10 @@ preflight_home() {
   if [[ "$1" == with-claude ]]; then
     mkdir -p "$h/.local/bin"
     ln -s "$ROOT/tests/fake-claude" "$h/.local/bin/claude"
+  fi
+  if [[ "$1" == with-opencode ]]; then
+    mkdir -p "$h/.opencode/bin"
+    ln -s "$ROOT/tests/fake-opencode" "$h/.opencode/bin/opencode"
   fi
   printf '%s' "$h"
 }
@@ -418,6 +423,55 @@ test_submit_dirty_tree() {
   wait_done "$ID" || return 1
   ! grep -q dirty "$(jobdir "$ID")/patch.diff" || fail "uncommitted change leaked into the job"
   assert_eq "$(tail -1 README.md)" dirty "user tree untouched"
+}
+
+test_submit_overlap_warn_active() {
+  write_ticket docs/t/02-b.md lib/x.txt
+  write_ticket docs/t/03-c.md lib/x.txt lib/y.txt
+  commit_all overlap-tickets
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=3
+  sub submit docs/t/02-b.md
+  assert_rc 0 || return 1
+  local a b
+  a="$(jget '.[0].id')"
+  sub submit docs/t/03-c.md
+  assert_rc 0 || return 1
+  b="$(jget '.[0].id')"
+  grep -q "overlaps with active job $a" "$T/err" || fail "stderr: $(cat "$T/err")"
+  grep -q "lib/x.txt" "$T/err" || fail "stderr: $(cat "$T/err")"
+  wait_done "$a" || return 1
+  wait_done "$b" || return 1
+}
+
+test_submit_overlap_no_warn_disjoint() {
+  write_ticket docs/t/02-b.md lib/x.txt
+  write_ticket docs/t/03-c.md lib/z.txt
+  commit_all overlap-tickets
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=3
+  sub submit docs/t/02-b.md
+  assert_rc 0 || return 1
+  local a b
+  a="$(jget '.[0].id')"
+  sub submit docs/t/03-c.md
+  assert_rc 0 || return 1
+  b="$(jget '.[0].id')"
+  if grep -q "overlaps" "$T/err"; then fail "unexpected warning: $(cat "$T/err")"; fi
+  wait_done "$a" || return 1
+  wait_done "$b" || return 1
+}
+
+test_submit_overlap_no_warn_finished() {
+  write_ticket docs/t/02-b.md lib/x.txt
+  write_ticket docs/t/03-c.md lib/x.txt
+  commit_all overlap-tickets
+  sub run docs/t/02-b.md
+  assert_rc 0 || return 1
+  sub submit docs/t/03-c.md
+  assert_rc 0 || return 1
+  if grep -q "overlaps" "$T/err"; then fail "unexpected warning: $(cat "$T/err")"; fi
+  local b
+  b="$(jget '.[0].id')"
+  wait_done "$b" || return 1
 }
 
 # ---- query (05) ----------------------------------------------------------
@@ -1262,7 +1316,7 @@ test_resume_history() {
   assert_eq "$(jq -r --arg id "$new" 'select(.type == "job" and .id == $id) | .resume_of' "$SUBCON_STATE/history.jsonl")" "$ID" resume_of
 }
 
-# ---- driver (35) -----------------------------------------------------------
+# ---- driver (38) -----------------------------------------------------------
 
 # Copy the subcon tree to $SX with an extra fake driver installed, so
 # driver-selection tests never touch the real tree.
@@ -1334,6 +1388,35 @@ test_driver_fake_trailer() {
   SUBCON_DRIVER=fakeok subx trailer
   assert_rc 0 || return 1
   assert_match "$OUT" '^Co-Authored-By: Fake Model One <[^>]+>$' trailer
+}
+
+test_driver_trailer_latest_job() {
+  make_driver_tree
+  subx run --driver fakeok docs/t/01-a.md
+  assert_rc 0 || return 1
+  subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Fake Model One' trailer
+  sub run docs/t/01-a.md
+  assert_rc 0 || return 1
+  subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
+  SUBCON_DRIVER=claude subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Claude Haiku 5\.5' trailer
+}
+
+test_driver_trailer_latest_job_other_repo() {
+  make_driver_tree
+  local d="$SUBCON_STATE/jobs/20990101-000000-zz-otherrepo"
+  mkdir -p "$d"
+  cat > "$d/meta.json" <<'JSON'
+{"id":"20990101-000000-zz-otherrepo","repo":"/elsewhere","ticket":"docs/t/x.md","model":"claude-haiku-5-5","runner":"local","driver":"claude"}
+JSON
+  subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
 }
 
 test_driver_fake_resume_pinned() {
@@ -1606,6 +1689,19 @@ test_driver_opencode_preflight_missing() {
   assert_rc 1 || return 1
   grep -q "opencode not found" "$T/err" || fail "stderr: $(cat "$T/err")"
   assert_eq "$(jobcount)" 0 jobs
+}
+
+test_driver_opencode_preflight_homebin() {
+  make_driver_tree
+  local cp h
+  cp="$(clean_path)"
+  h="$(preflight_home with-opencode)"
+  HOME="$h" PATH="$cp" subx submit --driver opencode docs/t/01-a.md
+  assert_rc 0 || return 1
+  ID="$(jget '.[0].id')"
+  wait_done "$ID" || return 1
+  assert_eq "$(result "$ID" .status)" done status
+  assert_eq "$(result "$ID" .checks.ok)" true checks.ok
 }
 
 test_driver_opencode_custom_model_trailer() {
@@ -2354,10 +2450,63 @@ test_logcmd_no_args() {
   assert_rc 1 || return 1
 }
 
+# ---- budget (46) -----------------------------------------------------------
+
+test_budget_tokens_exceeded() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20
+  SUBCON_BUDGET_TOKENS=100 sub submit docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "SUBCON_BUDGET_TOKENS" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_budget_tokens_under() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20
+  SUBCON_BUDGET_TOKENS=101 sub submit docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jobcount)" 1 jobs
+}
+
+test_budget_jobs_exceeded() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20
+  hjob B "$TOP" m1 finished done true 10 80 20
+  SUBCON_BUDGET_JOBS=2 sub submit docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "SUBCON_BUDGET_JOBS" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_budget_old_month_ignored() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 99980 20 40
+  SUBCON_BUDGET_TOKENS=10 sub submit docs/t/01-a.md
+  assert_rc 0 || return 1
+  assert_eq "$(jobcount)" 1 jobs
+}
+
+test_budget_run_blocked() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20
+  SUBCON_BUDGET_TOKENS=100 sub run docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "SUBCON_BUDGET_TOKENS" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
+test_budget_invalid_value() {
+  SUBCON_BUDGET_TOKENS=abc sub submit docs/t/01-a.md
+  assert_rc 1 || return 1
+  grep -q "SUBCON_BUDGET_TOKENS" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_eq "$(jobcount)" 0 jobs
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver budget)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
