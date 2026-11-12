@@ -159,18 +159,32 @@ issue_ref_json() {
   jq -cn --arg repo "$slug" --argjson number "$number" '{repo: $repo, number: $number}'
 }
 
-# latest_job_meta: print the meta.json of this repository's newest job (job IDs sort by time).
+# latest_job_meta: print the meta.json of this repository's newest job
+# (ordered by created_at, then meta.json mtime, then job ID).
 # Returns 1 outside a git repository or when no job of this repository exists.
 latest_job_meta() {
-  local top id d
+  local top d meta id repo ca mt
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
-  while IFS= read -r id; do
-    if [[ "$(jq -r .repo "$(job_dir "$id")/meta.json" 2>/dev/null)" == "$top" ]]; then
-      echo "$(job_dir "$id")/meta.json"
-      return 0
-    fi
-  done < <(for d in "$(jobs_dir)"/*; do [[ -d "$d" ]] && basename "$d"; done | LC_ALL=C sort -r)
-  return 1
+  [[ -d "$(jobs_dir)" ]] || return 1
+
+  local items=()
+  for d in "$(jobs_dir)"/*; do
+    [[ -d "$d" ]] || continue
+    meta="$d/meta.json"
+    [[ -f "$meta" ]] || continue
+    repo="" ca=""
+    IFS=$'\t' read -r repo ca < <(jq -r '[.repo // "", .created_at // ""] | @tsv' "$meta" 2>/dev/null) || true
+    [[ "$repo" == "$top" ]] || continue
+    id="$(basename "$d")"
+    mt="$(date -r "$meta" +%s 2>/dev/null || stat -f %m "$meta" 2>/dev/null || stat -c %Y "$meta" 2>/dev/null || echo 0)"
+    items+=("$(printf '%s\t%s\t%s\t%s' "$ca" "$mt" "$id" "$meta")")
+  done
+
+  if [[ ${#items[@]} -eq 0 ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "${items[@]}" | LC_ALL=C sort -t$'\t' -k1,1r -k2,2rn -k3,3r | head -1 | cut -f4
 }
 
 cmd_trailer() {

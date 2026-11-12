@@ -1749,6 +1749,55 @@ JSON
   assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
 }
 
+test_driver_trailer_latest_job_same_second() {
+  make_driver_tree
+  local d1="$SUBCON_STATE/jobs/20261112-120000-01-a-rand1"
+  local d2="$SUBCON_STATE/jobs/20261112-120000-01-a-rand2"
+  mkdir -p "$d1" "$d2"
+
+  # rand2 has lexicographically larger job ID, but rand1 has newer created_at.
+  cat > "$d1/meta.json" <<JSON
+{"id":"20261112-120000-01-a-rand1","repo":"$TOP","ticket":"docs/t/01-a.md","driver":"fakeok","model":"fake-1","created_at":"2026-11-12T12:00:05Z"}
+JSON
+  cat > "$d2/meta.json" <<JSON
+{"id":"20261112-120000-01-a-rand2","repo":"$TOP","ticket":"docs/t/01-a.md","driver":"agy","model":"gemini-3.8-flash-medium","created_at":"2026-11-12T12:00:01Z"}
+JSON
+
+  subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Fake Model One' trailer
+
+  local meta
+  meta="$(export SUBCON_ROOT="$ROOT"; source "$ROOT/lib/common.sh"; latest_job_meta)"
+  assert_eq "$meta" "$d1/meta.json" "newer created_at wins" || return 1
+
+  # Tiebreak 1: same created_at, newer mtime wins.
+  cat > "$d1/meta.json" <<JSON
+{"id":"20261112-120000-01-a-rand1","repo":"$TOP","ticket":"docs/t/01-a.md","driver":"fakeok","model":"fake-1","created_at":"2026-11-12T12:00:00Z"}
+JSON
+  cat > "$d2/meta.json" <<JSON
+{"id":"20261112-120000-01-a-rand2","repo":"$TOP","ticket":"docs/t/01-a.md","driver":"agy","model":"gemini-3.8-flash-medium","created_at":"2026-11-12T12:00:00Z"}
+JSON
+  touch -t 202601011200.00 "$d2/meta.json"
+  touch -t 202601011200.10 "$d1/meta.json"
+  subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Fake Model One' trailer
+
+  meta="$(export SUBCON_ROOT="$ROOT"; source "$ROOT/lib/common.sh"; latest_job_meta)"
+  assert_eq "$meta" "$d1/meta.json" "newer mtime wins on equal created_at" || return 1
+
+  # Tiebreak 2: same created_at and same mtime, larger job ID wins (rand2 > rand1).
+  touch -t 202601011200.00 "$d1/meta.json"
+  touch -t 202601011200.00 "$d2/meta.json"
+  subx trailer
+  assert_rc 0 || return 1
+  assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
+
+  meta="$(export SUBCON_ROOT="$ROOT"; source "$ROOT/lib/common.sh"; latest_job_meta)"
+  assert_eq "$meta" "$d2/meta.json" "larger ID wins on equal created_at and mtime" || return 1
+}
+
 test_driver_fake_resume_pinned() {
   make_driver_tree
   export FAKE_DRIVER_MODE=error
