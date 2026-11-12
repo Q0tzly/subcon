@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `subcon new <feature>/<NN-name>` | `docs/design/<feature>/<NN-name>.md` をテンプレートから生成する。既にファイルが存在する場合はエラー | 単体オブジェクト: `{"path": "..."}` |
 | `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] [--issue <ref>] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が同じリポジトリの実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない）。環境変数 `SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS` が設定されている場合、今月（UTC）の終了ジョブの合計トークン数または件数が上限以上なら、ジョブを 1 つも作らず終了コード 1 で失敗する（`run` も同じ。`resume` は対象外）。上限値が非負整数でなければ、処理を始めずに終了コード 1 で失敗する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
-| `subcon wait [--timeout SEC] <id>...` | 指定した全ジョブの完了を待機する | 配列: 各ジョブの結果オブジェクト `[{"v": 1, ...}, ...]` |
+| `subcon wait [--timeout T] <id>...` | 指定した全ジョブの完了を待機する | 配列: 各ジョブの結果オブジェクト `[{"v": 1, ...}, ...]` |
 | `subcon run [--runner R] [--model M] [--driver D] [--timeout T] [--issue <ref>] <ticket>` | 票 1 枚を `submit` し、完了するまで `wait` する | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
 | `subcon resume [--timeout T] <id>` | 失敗したジョブを、元のジョブのドライバの会話履歴を引き継いで新しいジョブとして再開する | 配列: `[{"ticket": "...", "id": "..."|"null", "resume_of": "...", "error": "..."|"null"}]` |
 | `subcon show <id>` | 指定したジョブの結果を表示する。実行中の場合は `state` だけが埋まった結果を返す | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
@@ -102,7 +102,7 @@
 - `--driver D`: 実装役ドライバを指定する（`drivers/` 配下の名前）。`submit` / `run` / `trailer` で使える。`resume` は元ジョブのドライバに固定され、`reject` は元ジョブのドライバで再委任する。既定値は環境変数 `SUBCON_DRIVER` の値、未設定時は `agy`（`trailer` のみ、両方とも未指定ならこのリポジトリの直近ジョブのドライバを使い、ジョブが無ければ `agy`）。`opencode` ドライバも選択でき、モデルは `provider/model` 形式で任意に指定できる（既定はドライバの `default-model`）。`ci` ランナーは `agy` と `claude` に対応する。`ci` で `claude` を使う認証はランナーマシン側で用意する（環境変数 `CLAUDE_CODE_OAUTH_TOKEN`（setup-token）または `ANTHROPIC_API_KEY`。ランナーマシンの `~/.config/subcon/claude-env` に置いてもよい）。`container` ランナーは `agy` と `claude` に対応し、`claude` の場合は環境変数 `ANTHROPIC_API_KEY` が必要（未設定・空なら submit 時に終了コード 1 で失敗する）。
 - `--model M`: 選択したドライバに渡すモデル ID を指定する。既定値は環境変数 `SUBCON_MODEL` の値、未設定時はドライバごとの既定モデル（`trailer` でドライバを直近ジョブから引いた場合は、そのジョブのモデル。`--driver` / `SUBCON_DRIVER` を指定した場合は引かない）（`agy`: `gemini-3.8-flash-medium`、`claude`: `claude-haiku-5-5`）。
 - `--timeout T`（`submit` / `run` / `resume`）: ドライバに渡すタイムアウト文字列（例: `30m`, `540s`）。既定値は `30m`（`resume` で省略時は再開元ジョブの設定値を引き継ぐ）。
-- `--timeout SEC`（`wait`）: 待機する秒数（整数）。既定値は `0`（無期限）。指定秒数が経過しても完了していないジョブがある場合、その時点の結果（未終了ジョブは `state: queued` または `running`）を出力して終了コード 5 で終了する（ジョブ自体は停止させない）。
+- `--timeout T`（`wait`）: 待機する時間。整数のみ（秒、従来どおり）、または単位付き `<N>s` / `<N>m` / `<N>h`（N は0以上の整数）。既定値は `0`（無期限）。指定時間が経過しても完了していないジョブがある場合、その時点の結果（未終了ジョブは `state: queued` または `running`）を出力して終了コード 5 で終了する（ジョブ自体は停止させない）。不正な値（負数・小数・不明な単位・文字列など）は終了コード 1 で失敗する。
 - `--issue <ref>`（`submit` / `run`）: 票の発生元 issue への参照を指定する。受理する形式は `#123`（カレントリポジトリの origin リモートが GitHub の場合）、`owner/repo#123`、および `https://github.com/owner/repo/issues/123`。番号は 1 以上の整数でなければならない。形式不正や origin が取得できない場合はエラーとなり、ジョブは作成されない。`resume` で作られる新ジョブは元ジョブの issue を引き継ぐ。
 
 ## 利用者向け環境変数

@@ -109,7 +109,20 @@ cmd_wait() {
     case "$1" in
       --timeout)
         [[ $# -ge 2 ]] || die "--timeout requires a value"
-        timeout="$2"
+        local timeout_arg="$2"
+        if [[ "$timeout_arg" =~ ^[0-9]+$ ]]; then
+          timeout="$(( 10#$timeout_arg ))"
+        elif [[ "$timeout_arg" =~ ^([0-9]+)([smh])$ ]]; then
+          local n="${BASH_REMATCH[1]}"
+          local u="${BASH_REMATCH[2]}"
+          case "$u" in
+            s) timeout="$(( 10#$n ))" ;;
+            m) timeout="$(( 10#$n * 60 ))" ;;
+            h) timeout="$(( 10#$n * 3600 ))" ;;
+          esac
+        else
+          die "invalid --timeout: $timeout_arg"
+        fi
         shift 2
         ;;
       -*)
