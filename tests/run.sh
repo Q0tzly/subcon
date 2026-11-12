@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver budget (all when none given).
+# Groups: ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1276,6 +1276,64 @@ test_stats_real_jobs() {
   assert_eq "$(jget .tokens.total)" 240 tokens
   assert_eq "$(jget .tokens.cache_read)" 60 tokens.cache_read
   assert_eq "$(jget .tokens.thinking)" 20 tokens.thinking
+}
+
+# ---- export (49) ---------------------------------------------------------
+
+test_export_basic() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20
+  hjob B "/other/repo" m1 finished done true 10 80 20
+  printf '{"type":"event","id":"A","event":"applied","at":"2026-01-01T00:00:01Z"}\n' >> "$(hist)"
+  sub export
+  assert_rc 0 || return 1
+  assert_eq "$(wc -l <<<"$OUT" | tr -d ' ')" "2" line-count
+  local env1
+  env1="$(head -1 <<<"$OUT")"
+  assert_eq "$(jq -r .type <<<"$env1")" "export" envelope-type
+  assert_eq "$(jq -r .v <<<"$env1")" "1" envelope-v
+  assert_eq "$(jq -r .scope <<<"$env1")" "repo" envelope-scope
+  assert_eq "$(jq -r .repo <<<"$env1")" "$TOP" envelope-repo
+  assert_match "$(jq -r .exported_at <<<"$env1")" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' exported_at
+  assert_eq "$(tail -1 <<<"$OUT" | jq -r .id)" "A" job-line
+  ! grep -q '"type":"event"' <<<"$OUT" || fail "event line leaked into export"
+}
+
+test_export_all() {
+  mkdir -p "$SUBCON_STATE"
+  hjob A "$TOP" m1 finished done true 10 80 20
+  hjob B "/other/repo" m1 finished done true 10 80 20
+  sub export --all
+  assert_rc 0 || return 1
+  assert_eq "$(wc -l <<<"$OUT" | tr -d ' ')" "3" line-count
+  local env1
+  env1="$(head -1 <<<"$OUT")"
+  assert_eq "$(jq -r .scope <<<"$env1")" "all" envelope-scope
+  assert_eq "$(jq -r .repo <<<"$env1")" "null" envelope-repo
+}
+
+test_export_since() {
+  mkdir -p "$SUBCON_STATE"
+  hjob OLD "$TOP" m1 finished done true 10 80 20 3
+  hjob NEW "$TOP" m1 finished done true 10 80 20 0
+  sub export --since 1d
+  assert_rc 0 || return 1
+  assert_eq "$(wc -l <<<"$OUT" | tr -d ' ')" "2" line-count
+  assert_eq "$(tail -1 <<<"$OUT" | jq -r .id)" "NEW" job-line
+}
+
+test_export_empty() {
+  sub export
+  assert_rc 0 || return 1
+  assert_eq "$(wc -l <<<"$OUT" | tr -d ' ')" "1" line-count
+  assert_eq "$(jq -r .type <<<"$OUT")" "export" envelope-type
+}
+
+test_export_bad_args() {
+  subx export --bogus
+  assert_rc 1 || return 1
+  subx export --since 3w
+  assert_rc 1 || return 1
 }
 
 # ---- resume (08) ---------------------------------------------------------
@@ -2579,7 +2637,7 @@ test_budget_invalid_value() {
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats resume preflight authwarn container containerpre cijob cirunner cipre driver budget)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
