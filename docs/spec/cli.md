@@ -11,7 +11,7 @@
 | コマンド | 動作 | stdout の形式 |
 | --- | --- | --- |
 | `subcon new <feature>/<NN-name>` | `docs/design/<feature>/<NN-name>.md` をテンプレートから生成する。既にファイルが存在する場合はエラー | 単体オブジェクト: `{"path": "..."}` |
-| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
+| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない） | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
 | `subcon wait [--timeout SEC] <id>...` | 指定した全ジョブの完了を待機する | 配列: 各ジョブの結果オブジェクト `[{"v": 1, ...}, ...]` |
 | `subcon run [--runner R] [--model M] [--driver D] [--timeout T] <ticket>` | 票 1 枚を `submit` し、完了するまで `wait` する | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
 | `subcon resume [--timeout T] <id>` | 失敗したジョブを、元のジョブのドライバの会話履歴を引き継いで新しいジョブとして再開する | 配列: `[{"ticket": "...", "id": "..."|"null", "resume_of": "...", "error": "..."|"null"}]` |
@@ -25,7 +25,7 @@
 | `subcon discard <id>...` | 指定したジョブの作業領域およびジョブディレクトリを削除する。実行中のプロセスは停止させる | 単体オブジェクト: `{"discarded": ["<id>", ...]}` |
 | `subcon stats [--all] [--since <N>d\|<N>h] [--text]` | 履歴ファイル（`history.jsonl`）を集計して統計を出力する | 単体オブジェクト: 集計 JSON（`--text` 指定時は人間向けのテキスト表） |
 | `subcon guide` | 委任ルール文書（`docs/delegation.md`）を表示する | テキスト: Markdown |
-| `subcon trailer [--model M] [--driver D]` | コミットメッセージに付与する `Co-Authored-By` 行を表示する | テキスト: `Co-Authored-By: <Model Name> <email>` |
+| `subcon trailer [--model M] [--driver D]` | コミットメッセージに付与する `Co-Authored-By` 行を表示する。ドライバ・モデルは `--driver` / `--model` > 環境変数 `SUBCON_DRIVER`（モデルは `SUBCON_MODEL` も含む既定）> このリポジトリの直近ジョブ（ドライバとモデル）> `agy` の順に決める | テキスト: `Co-Authored-By: <Model Name> <email>` |
 
 ドライバの事前確認（preflight）: `submit`, `run`, `resume`, `commit`, `reject`, `trailer` は、実行前に選択中ドライバ（既定は `agy`、`resume` は元ジョブに記録されたドライバ）の `preflight` を呼ぶ。実行できない場合は処理を開始せず、終了コード 1 で失敗する。agy ドライバの場合は `PATH` または `$HOME/.local/bin/agy` からバイナリを解決し、見つからなければ `agy not found` を含むエラーで失敗する。
 
@@ -88,8 +88,8 @@
 ## 主なオプション
 
 - `--runner R`: ジョブを実行するランナーを指定する（`runners/` 配下のスクリプト名）。既定値は `local`。指定されたランナーが存在しない場合は終了コード 1。
-- `--driver D`: 実装役ドライバを指定する（`drivers/` 配下の名前）。`submit` / `run` / `trailer` で使える。`resume` は元ジョブのドライバに固定され、`reject` は元ジョブのドライバで再委任する。既定値は環境変数 `SUBCON_DRIVER` の値、未設定時は `agy`。`opencode` ドライバも選択でき、モデルは `provider/model` 形式で任意に指定できる（既定はドライバの `default-model`）。`ci` ランナーは `agy` と `claude` に対応する。`ci` で `claude` を使う認証はランナーマシン側で用意する（環境変数 `CLAUDE_CODE_OAUTH_TOKEN`（setup-token）または `ANTHROPIC_API_KEY`。ランナーマシンの `~/.config/subcon/claude-env` に置いてもよい）。`container` ランナーは `agy` と `claude` に対応し、`claude` の場合は環境変数 `ANTHROPIC_API_KEY` が必要（未設定・空なら submit 時に終了コード 1 で失敗する）。
-- `--model M`: 選択したドライバに渡すモデル ID を指定する。既定値は環境変数 `SUBCON_MODEL` の値、未設定時はドライバごとの既定モデル（`agy`: `gemini-3.8-flash-medium`、`claude`: `claude-haiku-5-5`）。
+- `--driver D`: 実装役ドライバを指定する（`drivers/` 配下の名前）。`submit` / `run` / `trailer` で使える。`resume` は元ジョブのドライバに固定され、`reject` は元ジョブのドライバで再委任する。既定値は環境変数 `SUBCON_DRIVER` の値、未設定時は `agy`（`trailer` のみ、両方とも未指定ならこのリポジトリの直近ジョブのドライバを使い、ジョブが無ければ `agy`）。`opencode` ドライバも選択でき、モデルは `provider/model` 形式で任意に指定できる（既定はドライバの `default-model`）。`ci` ランナーは `agy` と `claude` に対応する。`ci` で `claude` を使う認証はランナーマシン側で用意する（環境変数 `CLAUDE_CODE_OAUTH_TOKEN`（setup-token）または `ANTHROPIC_API_KEY`。ランナーマシンの `~/.config/subcon/claude-env` に置いてもよい）。`container` ランナーは `agy` と `claude` に対応し、`claude` の場合は環境変数 `ANTHROPIC_API_KEY` が必要（未設定・空なら submit 時に終了コード 1 で失敗する）。
+- `--model M`: 選択したドライバに渡すモデル ID を指定する。既定値は環境変数 `SUBCON_MODEL` の値、未設定時はドライバごとの既定モデル（`trailer` でドライバを直近ジョブから引いた場合は、そのジョブのモデル。`--driver` / `SUBCON_DRIVER` を指定した場合は引かない）（`agy`: `gemini-3.8-flash-medium`、`claude`: `claude-haiku-5-5`）。
 - `--timeout T`（`submit` / `run` / `resume`）: ドライバに渡すタイムアウト文字列（例: `30m`, `540s`）。既定値は `30m`（`resume` で省略時は再開元ジョブの設定値を引き継ぐ）。
 - `--timeout SEC`（`wait`）: 待機する秒数（整数）。既定値は `0`（無期限）。指定秒数が経過しても完了していないジョブがある場合、その時点の結果（未終了ジョブは `state: queued` または `running`）を出力して終了コード 5 で終了する（ジョブ自体は停止させない）。
 

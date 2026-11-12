@@ -127,8 +127,22 @@ model_name() {
   echo "${name:-$1}"
 }
 
+# latest_job_meta: print the meta.json of this repository's newest job (job IDs sort by time).
+# Returns 1 outside a git repository or when no job of this repository exists.
+latest_job_meta() {
+  local top id d
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  while IFS= read -r id; do
+    if [[ "$(jq -r .repo "$(job_dir "$id")/meta.json" 2>/dev/null)" == "$top" ]]; then
+      echo "$(job_dir "$id")/meta.json"
+      return 0
+    fi
+  done < <(for d in "$(jobs_dir)"/*; do [[ -d "$d" ]] && basename "$d"; done | LC_ALL=C sort -r)
+  return 1
+}
+
 cmd_trailer() {
-  local driver="${SUBCON_DRIVER:-agy}" model=""
+  local driver="" model="" driver_set=0 job_meta="" from_job=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --model)
@@ -139,6 +153,7 @@ cmd_trailer() {
       --driver)
         [[ $# -ge 2 ]] || die "--driver requires a value"
         driver="$2"
+        driver_set=1
         shift 2
         ;;
       *)
@@ -146,6 +161,20 @@ cmd_trailer() {
         ;;
     esac
   done
+  if [[ $driver_set -eq 0 && -n "${SUBCON_DRIVER:-}" ]]; then
+    driver="$SUBCON_DRIVER"
+    driver_set=1
+  fi
+  if [[ $driver_set -eq 0 ]]; then
+    if job_meta="$(latest_job_meta)" && driver="$(jq -r '.driver // "agy"' "$job_meta" 2>/dev/null)"; then
+      from_job=1
+    else
+      driver="agy"
+    fi
+  fi
+  if [[ -z "$model" && $from_job -eq 1 ]]; then
+    model="$(jq -r '.model // empty' "$job_meta" 2>/dev/null)" || model=""
+  fi
   require_driver "$driver"
   [[ -n "$model" ]] || model="$(default_model "$driver")"
   local name
