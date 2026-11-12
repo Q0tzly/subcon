@@ -1673,7 +1673,7 @@ test_preflight_claude_fallback_run() {
   assert_rc 0 || return 1
   assert_eq "$(jget .state)" finished state
   assert_eq "$(jget .status)" done status
-  HOME="$h" PATH="$cp" subx trailer
+  HOME="$h" PATH="$cp" subx trailer --driver claude
   assert_rc 0 || return 1
   assert_match "$OUT" 'Claude Haiku 5\.5' trailer
 }
