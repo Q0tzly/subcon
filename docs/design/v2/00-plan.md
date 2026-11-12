@@ -53,6 +53,8 @@
 | 49 | `subcon export` の新設とメタデータ形式の固定（issue #2 の本体） | Haiku（予備 Flash） | `bin/subcon` `lib/export.sh` `docs/spec/cli.md` `docs/spec/files.md` |
 | 50 | 票メタへの issue 参照（`--issue`、issue #7・foreman 受け口の前半） | Haiku（予備 Flash） | `lib/common.sh` `lib/job.sh` `lib/query.sh` `docs/spec/cli.md` `docs/spec/files.md` |
 | 51 | `subcon commit` での `Closes #N` 自動付記（issue #8・foreman 受け口の後半） | Flash | `lib/manage.sh` `docs/spec/cli.md` |
+| 52 | `wait --timeout` の値検証と単位（s/m/h）受理（issue #10） | Flash | `lib/query.sh` `docs/spec/cli.md` |
+| 53 | checks 再計算コマンド（issue #9） | Flash | （票52 の着地後に確定） |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す

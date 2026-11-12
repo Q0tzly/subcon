@@ -594,6 +594,26 @@ test_query_wait_timeout() {
   assert_eq "$(jget '.[0].ticket')" docs/t/01-a.md ticket
 }
 
+test_query_wait_timeout_units() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=8
+  submit_one docs/t/01-a.md || return 1
+  sub wait --timeout 1s "$ID"
+  assert_rc 5 || return 1
+  assert_match "$(jget '.[0].state')" '^(queued|running)$' state
+  sub wait --timeout 1m "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget '.[0].state')" finished state
+}
+
+test_query_wait_timeout_invalid() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  subx wait --timeout 5x "$ID"
+  assert_rc 1 || return 1
+  subx wait --timeout abc "$ID"
+  assert_rc 1 || return 1
+}
+
 test_query_show_running() {
   export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=6
   submit_one docs/t/01-a.md || return 1
