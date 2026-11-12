@@ -460,6 +460,38 @@ test_submit_overlap_no_warn_disjoint() {
   wait_done "$b" || return 1
 }
 
+test_submit_overlap_no_warn_other_repo() {
+  write_ticket docs/t/02-b.md lib/x.txt
+  commit_all overlap-tickets
+  local d="$SUBCON_STATE/jobs/20260101-000000-fake-active"
+  mkdir -p "$d"
+  echo running > "$d/state"
+  write_ticket "$d/ticket.md" lib/x.txt
+  printf '{"id":"20260101-000000-fake-active","repo":"/elsewhere"}' > "$d/meta.json"
+  sub submit docs/t/02-b.md
+  assert_rc 0 || return 1
+  if grep -q "overlaps" "$T/err"; then fail "unexpected warning: $(cat "$T/err")"; fi
+  local b
+  b="$(jget '.[0].id')"
+  wait_done "$b" || return 1
+}
+
+test_submit_overlap_warn_same_repo() {
+  write_ticket docs/t/02-b.md lib/x.txt
+  commit_all overlap-tickets
+  local d="$SUBCON_STATE/jobs/20260101-000000-fake-active"
+  mkdir -p "$d"
+  echo running > "$d/state"
+  write_ticket "$d/ticket.md" lib/x.txt
+  printf '{"id":"20260101-000000-fake-active","repo":"%s"}' "$TOP" > "$d/meta.json"
+  sub submit docs/t/02-b.md
+  assert_rc 0 || return 1
+  grep -q "overlaps with active job 20260101-000000-fake-active" "$T/err" || fail "stderr: $(cat "$T/err")"
+  local b
+  b="$(jget '.[0].id')"
+  wait_done "$b" || return 1
+}
+
 test_submit_overlap_no_warn_finished() {
   write_ticket docs/t/02-b.md lib/x.txt
   write_ticket docs/t/03-c.md lib/x.txt
