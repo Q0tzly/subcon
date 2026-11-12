@@ -82,6 +82,7 @@ dotfiles を入れていれば、`ai/AGENTS.md` が `~/.claude/CLAUDE.md`、`~/.
 [foreman](https://github.com/Q0tzly/foreman) と連携することで、GitHub Issue を起点とした issue 駆動の開発フローを運用できます。
 
 - フロー: `auto` → 下書き → `approved` → intake 検証 → mini で subcon 実行 → Draft PR
+- 下書き票が automerge（docs / tested）を宣言した場合は、CI チェックが全緑になった時点で PR が自動マージされます。
 - 詳細は [Q0tzly/foreman の docs/DESIGN.md](https://github.com/Q0tzly/foreman/blob/main/docs/DESIGN.md) を参照。
 
 ## 開発
