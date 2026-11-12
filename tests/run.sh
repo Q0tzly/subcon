@@ -1216,6 +1216,16 @@ test_history_cost_absent_null() {
   assert_eq "$(jq -r .cost_usd <<<"$l")" "null" cost_usd
 }
 
+test_history_repo_slug() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  assert_eq "$(jq -r --arg id "$ID" 'select(.type == "job" and .id == $id) | .repo_slug' "$(hist)")" "null" slug-without-origin
+  git remote add origin git@github.com:Q0tzly/subcon.git
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  assert_eq "$(jq -r --arg id "$ID" 'select(.type == "job" and .id == $id) | .repo_slug' "$(hist)")" "Q0tzly/subcon" slug-with-origin
+}
+
 test_history_applied_event() {
   sub run docs/t/01-a.md
   local id
@@ -1485,6 +1495,32 @@ test_export_bad_args() {
   assert_rc 1 || return 1
   subx export --since 3w
   assert_rc 1 || return 1
+}
+
+test_export_source() {
+  sub export
+  assert_rc 0 || return 1
+  local s1 s2
+  s1="$(head -1 <<<"$OUT" | jq -r .source)"
+  assert_match "$s1" '^[0-9a-f]{32}$' source-format
+  assert_eq "$(cat "$SUBCON_STATE/source")" "$s1" source-file
+  sub export
+  assert_rc 0 || return 1
+  s2="$(head -1 <<<"$OUT" | jq -r .source)"
+  assert_eq "$s2" "$s1" source-stable
+}
+
+test_export_source_regenerated() {
+  sub export
+  assert_rc 0 || return 1
+  local s1 s2
+  s1="$(head -1 <<<"$OUT" | jq -r .source)"
+  rm -f "$SUBCON_STATE/source"
+  sub export
+  assert_rc 0 || return 1
+  s2="$(head -1 <<<"$OUT" | jq -r .source)"
+  assert_match "$s2" '^[0-9a-f]{32}$' source-format
+  [[ "$s2" != "$s1" ]] || fail "source was not regenerated"
 }
 
 # ---- resume (08) ---------------------------------------------------------
