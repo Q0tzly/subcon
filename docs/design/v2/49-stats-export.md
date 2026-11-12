@@ -8,8 +8,8 @@
 
 ## Files
 
-- bin/subcon（`export` の dispatch と Usage への追加）
-- lib/export.sh（新規）
+- bin/subcon （`export` の dispatch と Usage への追加）
+- lib/export.sh （新規）
 - docs/spec/cli.md
 - docs/spec/files.md
 
