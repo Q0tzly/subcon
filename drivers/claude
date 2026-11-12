@@ -3,10 +3,14 @@
 # Usage: drivers/claude <job-dir>. The caller (a runner) has already cd'd into work/.
 set -euo pipefail
 
+if ! command -v claude >/dev/null 2>&1 && [[ -n "${HOME:-}" && -x "$HOME/.local/bin/claude" ]]; then
+  export PATH="$HOME/.local/bin${PATH:+:$PATH}"
+fi
+
 case "${1:-}" in
   preflight)
     if ! command -v claude >/dev/null 2>&1; then
-      echo "claude not found: install Claude Code and make sure it is on PATH" >&2
+      echo "claude not found: install Claude Code and make sure it is on PATH or at ~/.local/bin/claude" >&2
       exit 1
     fi
     auth_out=""
