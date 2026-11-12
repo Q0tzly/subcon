@@ -21,6 +21,7 @@
 | `subcon log <id>` | ジョブの実行ログ（ジョブディレクトリの `log` ファイル）をそのまま出力する。実行中のジョブでも読める | テキスト: ログテキスト |
 | `subcon apply <id>` | ジョブのパッチを現在の作業ツリーに適用する（インデックスは触らず、コミットはしない） | 単体オブジェクト: `{"id": "...", "applied": true}` |
 | `subcon commit -m <message> [--edited] <id>` | 検収済みの変更をステージングし、trailer（`Co-Authored-By` / `Reviewed-By`、および issue 参照がある場合は `Closes`）を付与してコミットする | 単体オブジェクト: `{"id": "...", "commit": "<hash>"}` |
+| `subcon checks <id>` | 終了済みジョブ（`finished` または `failed`）の checks を現在の repo にある票ファイルから再計算して result.json を更新する | 単体オブジェクト: 更新後の checks オブジェクト |
 | `subcon reject -m <reason> [--model M] [--runner R] <id>` | 差し戻し理由を票の `## Notes` に追記してコミットし、同一票を再委任する | 単体オブジェクト: `{"id": "..."|"null", "reject_of": "...", "ticket": "...", "error": "..."|"null"}` |
 | `subcon discard <id>...` | 指定したジョブの作業領域およびジョブディレクトリを削除する。実行中のプロセスは停止させる | 単体オブジェクト: `{"discarded": ["<id>", ...]}` |
 | `subcon stats [--all] [--since <N>d\|<N>h] [--text]` | 履歴ファイル（`history.jsonl`）を集計して統計を出力する | 単体オブジェクト: 集計 JSON（`--text` 指定時は人間向けのテキスト表） |
@@ -55,7 +56,7 @@
     - `resume <id>`: 単一の ID を受け取るが、`submit` と同等のジョブ生成インターフェースとして配列 `[{...}]` を返す。
     - `wait <id>...`: 複数のジョブを同時に待機できるため、各ジョブの結果オブジェクトの配列 `[{...}, ...]` を返す。
     - `list [--all]`: 複数のジョブの一覧を表すため、ジョブ要約の配列 `[{...}, ...]` を返す。
-  - 単一ジョブまたは単一操作を扱うコマンド（`run`, `show`, `new`, `apply`, `commit`, `reject`, `discard`, `stats`）は単体オブジェクト `{...}` を返す。
+  - 単一ジョブまたは単一操作を扱うコマンド（`run`, `show`, `new`, `apply`, `commit`, `checks`, `reject`, `discard`, `stats`）は単体オブジェクト `{...}` を返す。
 - **版 (v) の付与**: ジョブ結果オブジェクト（`show` / `wait` / `run` が返すもの）には `v: 1` が付く。`list` の要約オブジェクトと `stats` の集計オブジェクトには `v` を付けない。
 
 ## 終了コード表

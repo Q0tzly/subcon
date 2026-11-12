@@ -25,6 +25,7 @@ usage: subcon new <feature>/<NN-name>
        subcon log <id>
        subcon apply <id>
        subcon commit -m <message> [--edited] <id>
+       subcon checks <id>
        subcon reject -m <reason> [--model M] [--runner R] <id>
        subcon discard <id>...
        subcon stats [--all] [--since <N>d|<N>h] [--text]
@@ -54,6 +55,7 @@ case "$cmd" in
   log) cmd_log "$@" ;;
   apply) cmd_apply "$@" ;;
   commit) cmd_commit "$@" ;;
+  checks) cmd_checks "$@" ;;
   reject) cmd_reject "$@" ;;
   discard) cmd_discard "$@" ;;
   stats) cmd_stats "$@" ;;

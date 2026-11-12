@@ -640,3 +640,83 @@ cmd_discard() {
 
   jq -cn --args '{discarded: $ARGS.positional}' "$@"
 }
+
+cmd_checks() {
+  [[ $# -eq 1 && -n "$1" ]] || die "job id required"
+
+  local id="$1"
+  local dir
+  dir="$(job_dir "$id")"
+  if [[ ! -d "$dir" ]]; then
+    echo "subcon: unknown job id: $id" >&2
+    return 1
+  fi
+
+  local cur_repo
+  cur_repo="$(repo_top)" || return 1
+
+  local job_repo
+  job_repo="$(jq -r .repo "$dir/meta.json" 2>/dev/null || echo "")"
+  if [[ "$job_repo" != "$cur_repo" ]]; then
+    echo "subcon: job repository ($job_repo) does not match current repository ($cur_repo)" >&2
+    return 1
+  fi
+
+  local res rc=0
+  res="$(job_result "$id")" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    return 1
+  fi
+
+  local state
+  state="$(jq -r .state <<<"$res")"
+  if [[ "$state" != "finished" && "$state" != "failed" ]]; then
+    echo "subcon: job $id is not finished or failed (state: $state)" >&2
+    return 1
+  fi
+
+  local patch="$dir/patch.diff"
+  local files_changed_json="[]"
+  if [[ -f "$patch" ]]; then
+    files_changed_json="$(git apply --numstat "$patch" 2>/dev/null | awk -F'\t' '{ p = $3; sub(/^.* => /, "", p); print p }' | jq -Rnc '[inputs | select(length > 0)]')"
+  fi
+
+  local rel_ticket
+  rel_ticket="$(jq -r .ticket "$dir/meta.json" 2>/dev/null || echo "")"
+  local ticket_file="$cur_repo/$rel_ticket"
+  local allowed_files_json="[]"
+  if [[ -f "$ticket_file" ]]; then
+    allowed_files_json="$(ticket_files "$ticket_file" | jq -Rnc '[inputs | select(length > 0)]')"
+  fi
+
+  local committed
+  committed="$(jq -r 'if .checks != null and .checks.committed != null then .checks.committed else false end' "$dir/result.json" 2>/dev/null || echo false)"
+
+  local recomputed_at
+  recomputed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  local prev
+  prev="$(jq -c '.checks // null | if . != null then del(.previous_checks) else null end' "$dir/result.json" 2>/dev/null || echo "null")"
+
+  local new_checks
+  new_checks="$(jq -cn \
+    --argjson committed "$committed" \
+    --argjson files "$files_changed_json" \
+    --argjson allowed "$allowed_files_json" \
+    --arg recomputed_at "$recomputed_at" \
+    --argjson prev "$prev" \
+    '{
+      ok: (($committed == false) and (($files - $allowed | length) == 0)),
+      committed: $committed,
+      outside_files: ($files - $allowed),
+      files_changed: $files,
+      recomputed_at: $recomputed_at,
+      previous_checks: $prev
+    }')"
+
+  local new_result
+  new_result="$(jq --argjson checks "$new_checks" '.checks = $checks' "$dir/result.json")"
+  echo "$new_result" | atomic_write "$dir/result.json"
+
+  echo "$new_checks"
+}
