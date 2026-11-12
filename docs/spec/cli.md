@@ -11,7 +11,7 @@
 | コマンド | 動作 | stdout の形式 |
 | --- | --- | --- |
 | `subcon new <feature>/<NN-name>` | `docs/design/<feature>/<NN-name>.md` をテンプレートから生成する。既にファイルが存在する場合はエラー | 単体オブジェクト: `{"path": "..."}` |
-| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない） | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
+| `subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...` | 全票を検証した後、票ごとにジョブを作成してバックグラウンドで実行を開始する。作成したジョブの `## Files` が実行中（queued / running）の他ジョブと重なる場合は、stderr に重なったジョブごとに警告を 1 行出す（終了コードには影響しない）。環境変数 `SUBCON_BUDGET_TOKENS` / `SUBCON_BUDGET_JOBS` が設定されている場合、今月（UTC）の終了ジョブの合計トークン数または件数が上限以上なら、ジョブを 1 つも作らず終了コード 1 で失敗する（`run` も同じ。`resume` は対象外）。上限値が非負整数でなければ、処理を始めずに終了コード 1 で失敗する | 配列: `[{"ticket": "...", "id": "..."|"null", "error": "..."|"null"}]` |
 | `subcon wait [--timeout SEC] <id>...` | 指定した全ジョブの完了を待機する | 配列: 各ジョブの結果オブジェクト `[{"v": 1, ...}, ...]` |
 | `subcon run [--runner R] [--model M] [--driver D] [--timeout T] <ticket>` | 票 1 枚を `submit` し、完了するまで `wait` する | 単体オブジェクト: ジョブの結果オブジェクト `{"v": 1, ...}` |
 | `subcon resume [--timeout T] <id>` | 失敗したジョブを、元のジョブのドライバの会話履歴を引き継いで新しいジョブとして再開する | 配列: `[{"ticket": "...", "id": "..."|"null", "resume_of": "...", "error": "..."|"null"}]` |
@@ -104,6 +104,8 @@
 - `SUBCON_REVIEWER`: コミット時のレビュアー情報（`Name <email>` 形式）。`subcon commit` を実行する際に設定が必須（未設定時は終了コード 1）。
 - `SUBCON_COAUTHOR_EMAIL`: `subcon commit` や `subcon trailer` で付与される `Co-Authored-By` のメールアドレス（未設定時は `noreply@google.com`）。
 - `SUBCON_NO_AUTH_WARNING`: 設定すると agy の認証方式に関する警告を表示しない。
+- `SUBCON_BUDGET_TOKENS`: 今月（UTC）の終了ジョブの `tokens.total` 合計の上限（非負整数）。達していると `submit` / `run` は新しいジョブを作らずに失敗する。未設定または空なら無制限。履歴に記録されたトークン数だけを数えるため、金額の上限ではない。
+- `SUBCON_BUDGET_JOBS`: 今月（UTC）の終了ジョブ件数の上限（非負整数）。達していると `submit` / `run` は新しいジョブを作らずに失敗する。未設定または空なら無制限。
 - `GEMINI_API_KEY`: subcon 自身は読み取らないが、agy の API キー認証に使われる環境変数で、subcon 経由の実行にも影響する。
 - `SUBCON_CONTAINER_ENGINE`: `container` ランナーで使用するコンテナエンジンバイナリ名またはパス（`docker` または `podman`）。未設定時は `docker` → `podman` の順に自動検出される。
 - `SUBCON_CONTAINER_IMAGE`: `container` ランナーで使用するコンテナイメージ名（未設定時は `subcon-runner:latest`）。

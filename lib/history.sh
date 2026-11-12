@@ -119,6 +119,21 @@ history_append_job() {
   _history_append "$line"
 }
 
+# history_month_usage: {"jobs": n, "tokens": t} over the finished jobs of the current UTC month.
+history_month_usage() {
+  local hfile
+  hfile="$(history_file)"
+  if [[ ! -f "$hfile" ]]; then
+    echo '{"jobs":0,"tokens":0}'
+    return 0
+  fi
+
+  jq -cs --arg month "$(date -u +%Y-%m)" '
+    [.[] | select(.type == "job" and ((.finished_at // "") | startswith($month)))]
+    | {jobs: length, tokens: (map(.tokens.total // 0) | add // 0)}
+  ' "$hfile"
+}
+
 history_append_event() {
   local id="${1:?job id required}"
   local event="${2:?event required}"

@@ -73,6 +73,27 @@ cmd_submit() {
     require_ci "$repo"
   fi
 
+  # Monthly budget caps. An empty value counts as unset; resume does not check them.
+  if [[ -n "${SUBCON_BUDGET_TOKENS:-}" ]]; then
+    [[ "$SUBCON_BUDGET_TOKENS" =~ ^[0-9]+$ ]] || die "invalid SUBCON_BUDGET_TOKENS: $SUBCON_BUDGET_TOKENS (must be a non-negative integer)"
+  fi
+  if [[ -n "${SUBCON_BUDGET_JOBS:-}" ]]; then
+    [[ "$SUBCON_BUDGET_JOBS" =~ ^[0-9]+$ ]] || die "invalid SUBCON_BUDGET_JOBS: $SUBCON_BUDGET_JOBS (must be a non-negative integer)"
+  fi
+  if [[ -n "${SUBCON_BUDGET_TOKENS:-}" || -n "${SUBCON_BUDGET_JOBS:-}" ]]; then
+    local budget_month budget_usage used_jobs used_tokens
+    budget_month="$(date -u +%Y-%m)"
+    budget_usage="$(history_month_usage)"
+    used_jobs="$(jq -r .jobs <<<"$budget_usage")"
+    used_tokens="$(jq -r .tokens <<<"$budget_usage")"
+    if [[ -n "${SUBCON_BUDGET_TOKENS:-}" && "$used_tokens" -ge "$SUBCON_BUDGET_TOKENS" ]]; then
+      die "monthly token budget reached: $used_tokens >= SUBCON_BUDGET_TOKENS=$SUBCON_BUDGET_TOKENS (UTC month $budget_month)"
+    fi
+    if [[ -n "${SUBCON_BUDGET_JOBS:-}" && "$used_jobs" -ge "$SUBCON_BUDGET_JOBS" ]]; then
+      die "monthly job budget reached: $used_jobs >= SUBCON_BUDGET_JOBS=$SUBCON_BUDGET_JOBS (UTC month $budget_month)"
+    fi
+  fi
+
   # Step 1: Validate all tickets upfront. If any fails, exit 1 without creating any job.
   local t
   for t in "${tickets[@]}"; do
