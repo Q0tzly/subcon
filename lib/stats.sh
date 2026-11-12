@@ -85,6 +85,7 @@ cmd_stats() {
     ($jobs | map(select($applied_ids[.id] == true)) | length) as $applied |
     ($jobs | map(select(.duration_s != null) | .duration_s) | sort) as $durs |
     ($jobs | map(select(.tokens != null) | .tokens)) as $toks |
+    ($jobs | map(select(.cost_usd != null))) as $priced |
     {
       "scope": (if $all then "all" else "repo" end),
       "repo": (if $all then null else $repo end),
@@ -120,6 +121,11 @@ cmd_stats() {
           }
         end
       ),
+      "cost": {
+        "usd": ($priced | map(.cost_usd) | add // 0),
+        "priced_jobs": ($priced | length),
+        "unpriced_jobs": ($jobs | map(select(.cost_usd == null)) | length)
+      },
       "tokens": {
         "input": ($toks | map(.input // 0) | add // 0),
         "output": ($toks | map(.output // 0) | add // 0),
@@ -176,6 +182,7 @@ cmd_stats() {
     "Status:        done: \(.by_status.done), partial: \(.by_status.partial), blocked: \(.by_status.blocked), none: \(.by_status.none)",
     "Duration:      \(if .duration_s == null then "-" else "total \(.duration_s.total)s, median \(.duration_s.median)s" end)",
     "Tokens:        input \(.tokens.input), output \(.tokens.output), total \(.tokens.total), cache_read \(.tokens.cache_read), thinking \(.tokens.thinking)",
+    "Cost:          $\((.cost.usd * 10000 | round) / 10000) (priced: \(.cost.priced_jobs), unpriced: \(.cost.unpriced_jobs))",
     "",
     "Model breakdown:",
     (

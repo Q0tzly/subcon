@@ -96,6 +96,12 @@ history_append_job() {
         else ([($result.diffstat | match("([0-9]+) deletion") | .captures[0].string | tonumber)][0] // 0)
         end
       ),
+      cost_usd: (
+        if ($agy | type == "object") and ($agy | has("cost_usd")) and ($agy.cost_usd | type == "number")
+        then $agy.cost_usd
+        else null
+        end
+      ),
       tokens: (
         if ($agy | type == "object") and ($agy.usage | type == "object") and $agy.usage != null then
           {

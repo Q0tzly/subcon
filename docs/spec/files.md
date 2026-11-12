@@ -169,6 +169,7 @@
   "created_at": "2026-11-11T09:00:00Z",
   "finished_at": "2026-11-11T09:05:00Z",
   "duration_s": 300.5,
+  "cost_usd": 0.42,
   "state": "finished",
   "status": "done",
   "checks_ok": true,
@@ -192,6 +193,7 @@
 - `driver`: 実行したドライバ名（`meta.json` の `driver` を写す。ドライバ記録の無い旧ジョブは `"agy"` として記録される）。
 - `finished_at`: ジョブ終了時刻（ISO 8601 UTC 文字列）。
 - `duration_s`: agy 出力の `duration_seconds`（数値、無ければ `null`）。
+- `cost_usd`: agy 出力の `cost_usd`（数値、無ければ `null`）。価格表による推定は行わない。`null` のジョブは stats で unpriced として件数のみ集計される。
 - `checks_ok`: `checks.ok` の値（真偽値、チェックが無ければ `null`）。
 - `files_changed`: 変更ファイル数（数値、無ければ `null`）。
 - `insertions`: パッチの追加行数（数値、パッチが無ければ `null`、変更なしなら `0`）。
