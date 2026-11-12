@@ -1641,7 +1641,7 @@ test_resume_history() {
   assert_eq "$(jq -r --arg id "$new" 'select(.type == "job" and .id == $id) | .resume_of' "$SUBCON_STATE/history.jsonl")" "$ID" resume_of
 }
 
-# ---- driver (38) -----------------------------------------------------------
+# ---- driver (39) -----------------------------------------------------------
 
 # Copy the subcon tree to $SX with an extra fake driver installed, so
 # driver-selection tests never touch the real tree.
@@ -1675,6 +1675,16 @@ DRIVER_EOF
 }
 
 subx() { OUT="$("$SX/bin/subcon" "$@" 2>"$T/err")" && RC=0 || RC=$?; }
+
+test_driver_agy_read_scope() {
+  export FAKE_AGY_LOG="$T/agy.log"
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  local parent
+  parent="$(dirname "$TOP")"
+  grep -F "read_file($parent)" "$T/agy.log" >/dev/null || fail "settings missing read_file for repo parent"
+  grep -F "read_file($(jobdir "$ID"))" "$T/agy.log" >/dev/null || fail "settings missing read_file for job dir"
+}
 
 test_driver_unknown() {
   sub submit --driver nope docs/t/01-a.md
