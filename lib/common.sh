@@ -2,6 +2,16 @@
 
 SUBCON_DEFAULT_TIMEOUT=30m
 SUBCON_COAUTHOR_EMAIL="${SUBCON_COAUTHOR_EMAIL:-noreply@google.com}"
+
+# The co-author email follows the implementer model's vendor;
+# SUBCON_COAUTHOR_EMAIL is the fallback for names not listed here.
+coauthor_email() {
+  case "$1" in
+    Claude*) echo "noreply@anthropic.com" ;;
+    Gemini*) echo "noreply@google.com" ;;
+    *) echo "$SUBCON_COAUTHOR_EMAIL" ;;
+  esac
+}
 SUBCON_SCHEMA="$SUBCON_ROOT/schema/result.schema.json"
 SUBCON_PROMPT_PREAMBLE="$SUBCON_ROOT/lib/prompt.md"
 SUBCON_RESUME_PROMPT="$SUBCON_ROOT/lib/resume-prompt.md"
@@ -141,5 +151,5 @@ cmd_trailer() {
   local name
   name="$(model_name "$model" "$driver")"
   [[ -n "$name" ]] || die "unknown model: $model (see: $driver models)"
-  echo "Co-Authored-By: $name <$SUBCON_COAUTHOR_EMAIL>"
+  echo "Co-Authored-By: $name <$(coauthor_email "$name")>"
 }

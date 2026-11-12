@@ -326,7 +326,7 @@ cmd_commit() {
   local commit_msg
   commit_msg="$message
 
-Co-Authored-By: $implementer <$SUBCON_COAUTHOR_EMAIL>"
+Co-Authored-By: $implementer <$(coauthor_email "$implementer")>"
   if [[ $edited -eq 1 ]]; then
     commit_msg="$commit_msg
 Co-Authored-By: $SUBCON_REVIEWER"
