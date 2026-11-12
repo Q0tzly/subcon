@@ -4,7 +4,7 @@
 
 # ランナー契約仕様
 
-ランナーは、ジョブ専用の作業ディレクトリ内で agy（エージェントバックエンド）を実行するための実行可能プログラムである。
+ランナーは、ジョブ専用の作業環境を用意し、その中でドライバ（`drivers/<name>`）を実行するための実行可能プログラムである。
 
 ## 契約本体
 
@@ -25,17 +25,17 @@
 
 ### 責務
 
-- `work/` をカレントディレクトリとして agy を実行する。
-- agy の最終出力をジョブディレクトリ直下の `agy.json` に書き出す。
-  - agy が途中で強制終了（kill 等）された場合でも、会話 ID が取得できていれば `{status: "ERROR", conversation_id: "...", error: "agy exited without a result"}` を `agy.json` に書き出す。
-- ジョブディレクトリ内に書き出すのは、`agy.json` およびランナー固有のログファイル（`agy.stream` 等）に限定する（パッチの生成やチェック、`result.json` の書き出しはホスト側の subcon が行う）。
-- ランナーの標準出力は回収されない。ジョブの `log` ファイルに残るのは標準エラー出力のみであり、診断情報は標準エラー出力へ書くこと。
-- subcon はジョブの終了・破棄時にランナーへ SIGTERM を送ることがある。ランナーは SIGTERM を受けたら子プロセスを含めて速やかに（目安として 5 秒以内に）終了すること。
+- `work/` をカレントディレクトリとして、選択されたドライバ（`drivers/<name>`。`SUBCON_DRIVER`、未設定時は `agy`）を実行する。
+- ドライバはエージェントバックエンドを起動し、その最終出力をジョブディレクトリ直下の `agy.json` に書き出す。
+  - エージェントが途中で強制終了（kill 等）された場合でも、会話 ID が確保できていれば `{status: "ERROR", conversation_id: "...", error: "..."}` を `agy.json` に書き出す（agy ドライバの場合は `{status: "ERROR", conversation_id: "...", error: "agy exited without a result"}`）。会話 ID の確保手段（事前確定またはストリームからの回収）は各ドライバの責務とする。
+- ジョブディレクトリ内に書き出すのは、`agy.json` およびドライバ／ランナー固有のログファイル（`agy.stream` 等）に限定する（パッチの生成やチェック、`result.json` の書き出しはホスト側の subcon が行う。互換性維持のためファイル名は `agy.*` のまま規定されている）。
+- ランナーおよびドライバの標準出力は回収されない。ジョブの `log` ファイルに残るのは標準エラー出力のみであり、診断情報は標準エラー出力へ書くこと。
+- subcon はジョブの終了・破棄時にランナーへ SIGTERM を送ることがある。ランナーは SIGTERM を受けたら子プロセス（ドライバおよびエージェント CLI）を含めて速やかに（目安として 5 秒以内に）終了すること。
 
 ### 終了コード
 
-- agy が成功終了した場合は終了コード `0` を返す。
-- agy がエラー終了または異常終了した場合は、非ゼロの終了コード（agy の終了コード、または 1）を返す。
+- ドライバ（エージェント）が完走（成功終了）した場合は終了コード `0` を返す（報告の `status` にかかわらず、エージェントが正常に実行を完了すれば `0`）。
+- ドライバ（エージェント）がエラー終了または異常終了した場合は、非ゼロの終了コード（ドライバの終了コード、または 1）を返す。
 
 ## 環境変数一覧表
 
@@ -70,16 +70,16 @@
 
 ホスト上の環境で選択されたドライバを直接実行する標準ランナー。
 
-- **stream-json と会話 ID の回収**:
-  - agy を `--output-format stream-json` で起動し、出力を `agy.stream` に保存する。
-  - stream-json の最初の `init` イベントから `conversation_id` を取得する。
-  - 最後の `result` イベントから `structured_output` 等を含む JSON を抽出し、`agy.json` に書き出す。
-  - agy が結果を出力する前に SIGKILL 等で停止した場合でも、`init` イベントで得られた `conversation_id` を用いて `{status: "ERROR", conversation_id: "...", error: "agy exited without a result"}` を `agy.json` に保存することで、後から `subcon resume` による再開を可能にする。
-  - 会話 ID はこの回収（ベストエフォート）で得る（agy / opencode）。最初のイベントが出る前に kill された場合は ID が残らず resume できないが、作業は始まっていないため同じ票を再 submit してよい。`claude` ドライバは実行前に ID を確定するため kill 後も resume できる（保証レベルの詳細は [backend.md](backend.md) の「会話 ID の保証レベル」を参照）。
+- **ドライバの起動**:
+  - カレントディレクトリを `$job_dir/work` に切り替え、`drivers/${SUBCON_DRIVER:-agy} "$job_dir"` を `exec` で起動する。
+  - エージェント CLI の起動、ログ出力（`agy.stream`）、結果の正規化（`agy.json` 生成）、および会話 ID の確保はすべてドライバ側の責務であり、local ランナー自身はエージェント固有のプロトコルに関与しない。
+- **会話 ID と resume（ドライバ規約）**:
+  - kill 時に再開可能とするため、会話 ID を実行早期に確保（事前確定、またはログ等からの回収）して `agy.json` に残す規約はドライバ側が担う。
+  - （注: agy ドライバの場合、`--output-format stream-json` で起動して出力を `agy.stream` に保存し、最初の `init` イベントから `conversation_id` を回収、最後の `result` イベントから `agy.json` を生成する。結果出力前に kill された場合でも `init` イベントで得られた会話 ID を用いてエラー結果を `agy.json` に残す。ドライバごとの会話 ID 保証レベルの詳細は [backend.md](backend.md) の「会話 ID の保証レベル」を参照）。
 
 ### container ランナー (`runners/container`)
 
-Docker または Podman を用いて使い捨てコンテナ内でドライバ（`agy` / `claude`）を実行する隔離ランナー。
+Docker または Podman を用いて使い捨てコンテナ内でドライバ（`agy` / `claude` 等）を実行する隔離ランナー。
 
 - **マウント構成**:
   - `$job_dir/work` → `/work`（rw、作業ディレクトリ）
@@ -88,13 +88,18 @@ Docker または Podman を用いて使い捨てコンテナ内でドライバ�
   - `$HOME/.claude` → `/home/runner/.claude`（rw、会話ファイルの永続化用。`driver=claude` のとき。認証は `ANTHROPIC_API_KEY` 環境変数で行う）
 - **環境変数の変換**:
   - コンテナ内のパスに合わせてパス変数を変換して渡す（`SUBCON_PROMPT_FILE=/job/prompt.txt`, `SUBCON_SCHEMA=/job/schema.json`）。
-  - `SUBCON_DRIVER` をコンテナへ渡し、entry が `subcon-driver-<name>` を解決する。
+  - `SUBCON_DRIVER` をコンテナへ渡し、エントリが `subcon-driver-<name>` を解決する。
   - `ANTHROPIC_API_KEY` はホスト側に設定されている場合のみ名前だけを渡す（値は引数に埋めない）。
   - ホスト側の uid:gid（`--user "$(id -u):$(id -g)"`）でコンテナを実行し、ホストとコンテナの間でファイルの所有者不整合が起きないようにする。
+- **コンテナ内エントリとドライバ規約の対応 (`runners/container-entry.sh`)**:
+  - コンテナイメージ内では、各ドライバ（`drivers/<name>`）が PATH 上に `subcon-driver-<name>` という命名規約で配置される（例: `drivers/agy` は `subcon-driver-agy`、`drivers/claude` は `subcon-driver-claude`）。
+  - コンテナのエントリスクリプト（`runners/container-entry.sh`、イメージ内では `/usr/local/bin/subcon-entry`）は、環境変数 `SUBCON_DRIVER`（未指定時は `agy`）に基づき `driver_bin="subcon-driver-${SUBCON_DRIVER:-agy}"` を解決する。
+  - エントリスクリプトは、ドライバ規約に従って第 1 引数にジョブディレクトリのパス（`$SUBCON_JOB_DIR`、コンテナ内パス `/job`）を渡してドライバを実行する（`"$driver_bin" "$job_dir"`）。コンテナの作業ディレクトリは起動時に `-w /work` として指定されているため、ドライバは `work/` 配下で実行される契約を満たす。
 - **イメージ作成の要点**:
   - `container/Containerfile` からビルドする。
-  - agy バイナリはイメージに同梱せず、ビルド時に公式インストーラ（`https://antigravity.google/cli/install.sh`）経由で取得する（再配布禁止規約に準拠）。
-  - claude バイナリもイメージに同梱せず、公式インストーラ（`https://claude.ai/install.sh`）経由で取得する。`drivers/claude` は `subcon-driver-claude` として同梱する。
+  - `runners/container-entry.sh` を `/usr/local/bin/subcon-entry` として同梱する。
+  - ホストの `drivers/agy` を `/usr/local/bin/subcon-driver-agy` として同梱する。agy バイナリ自体はイメージに同梱せず、ビルド時に公式インストーラ（`https://antigravity.google/cli/install.sh`）経由で取得する（再配布禁止規約に準拠）。
+  - ホストの `drivers/claude` を `/usr/local/bin/subcon-driver-claude` として同梱する。claude バイナリ自体もイメージに同梱せず、公式インストーラ（`https://claude.ai/install.sh`）経由で取得する。
   - Debian bookworm（glibc 2.28 以上）をベースとし、git, jq, curl を含む。
   - コンテナ内 git の誤動作防止のため、コンテナ側の git 設定で `safe.directory`（`/work`）を設定する。
 
