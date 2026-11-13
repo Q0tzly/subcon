@@ -66,7 +66,7 @@ subcon submit --runner ci <ticket>...
 
 実行ルートは以下の 2 段構えを想定している:
 
-- **self-hosted（自分のマシンで Actions を回す）**: 消費者サブスクリプションのログインで運用できる本命ルート。自分の CI／スクリプトから agy を呼ぶ形は、公式に意図された使い方とされている。
+- **self-hosted（自分のマシンで Actions を回す）**: 実行と agy の認証が利用者自身のマシンに留まるルート。自分の CI／スクリプトから直接 `agy` を呼ぶ限り、消費者サブスクリプションのログインも利用できる（下記「現状の制約」を参照）。エージェントに自動実行を任せる場合は API キー方式を使う。
 - **GitHub ホスト型ランナー**: API キー方式が必須で、有料ティアが前提（無料枠は 5 リクエスト/分で、エージェント実行には不足する）。
 
 終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
@@ -97,7 +97,7 @@ tests/run.sh submit     # グループ指定: ticket submit query manage history
 ## 現状の制約
 
 - local ランナーでは、agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。隔離が必要なときは container ランナーを使う。container ランナーでもネットワークは隔離されない（agy が API に到達するため）
-- agy の認証が消費者向け Google ログインの場合、`submit` / `resume` は警告を出す。消費者プランのログインをサードパーティ製エージェントから使うことは Antigravity の規約で認められておらず、アカウント停止の対象になりうる。API キー方式（`modelProvider: gemini` ＋ `GEMINI_API_KEY`）か、自分自身のスクリプト／CI からの利用がサポートされる形（詳細は docs/delegation.md）
+- agy の認証が消費者向け Google ログインの場合、`submit` / `resume` は警告を出す。Google の公式 FAQ は、消費者プランのログインをサードパーティ製エージェントやアプリから使うことを規約違反としており、Google アカウント全体の停止・終了の対象になると明記している。subcon 経由で agy を使う形は、起動するのが利用者自身でも「アプリによるラップ」に当たりうる。特に、上位エージェント（Claude Code 等）が subcon を起動して回す運用は、FAQ が非対応とする形そのものである。規約に適合する使い方は2つある。(1) API キー方式: `~/.gemini/antigravity-cli/settings.json` の `modelProvider` を `gemini` にし、`GEMINI_API_KEY` を設定する（キーは Google AI Studio で発行する）。エージェント経由の自動化には、公式が推奨するこの経路を使う。(2) 利用者自身のスクリプト／CI から `agy` を直接呼び出す形（subcon を介さない）。過去に許容と読める案内があったが、現行の FAQ が優先する。詳細は docs/delegation.md。
 
 ## ライセンス
 

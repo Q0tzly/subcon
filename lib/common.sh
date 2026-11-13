@@ -113,7 +113,7 @@ agy_auth_mode() {
 
 warn_consumer_auth() {
   if [[ "$(agy_auth_mode)" == "consumer" && -z "${SUBCON_NO_AUTH_WARNING:-}" ]]; then
-    echo 'subcon: warning: agy is using a consumer Google login. Driving agy from a third-party agent on a consumer plan (AI Pro etc.) violates Antigravity'\''s terms and risks account suspension. Supported options: switch agy to an API key (set "modelProvider": "gemini" in ~/.gemini/antigravity-cli/settings.json and export GEMINI_API_KEY), or run subcon from your own scripts/CI. Silence with SUBCON_NO_AUTH_WARNING=1.' >&2
+    echo 'subcon: warning: agy is using a consumer Google login. Driving agy from a third-party agent on a consumer plan (AI Pro etc.) violates Antigravity'\''s terms and risks suspension of your Google account. Supported options: switch agy to an API key (set "modelProvider": "gemini" in ~/.gemini/antigravity-cli/settings.json and export GEMINI_API_KEY), or call agy directly from your own scripts/CI. Silence with SUBCON_NO_AUTH_WARNING=1.' >&2
   fi
   return 0
 }

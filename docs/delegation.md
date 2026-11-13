@@ -108,8 +108,8 @@ stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは 
 ### agy の認証方式
 
 agy の認証が消費者向け Google ログイン（AI Pro など）の場合、`submit` / `resume` は警告を出してから実行する。
-消費者プランのログインをサードパーティ製エージェントから使うことは Antigravity の規約で認められておらず、アカウント停止の対象になりうるため。
-サポートされる形は、agy を API キー方式に切り替える（`~/.gemini/antigravity-cli/settings.json` の `modelProvider` を `gemini` にして `GEMINI_API_KEY` を設定）か、自分自身のスクリプト／CI から使うこと。
+Google の公式 FAQ は、消費者プランのログインをサードパーティ製エージェント（Claude Code 等）やアプリから使うことを規約違反とし、Google アカウント全体の停止・終了のリスクがあるとしている。subcon 経由の利用は、起動者が利用者自身でも「アプリによるラップ」に当たりうるもので、上位エージェントが subcon を起動する運用は明確に非対応の側にある。過去に許容と読めるスタッフ案内があったが、後の明確化で supersede されており、現行 FAQ が優先する。
+規約に適合する使い方は、(1) API キー方式（`~/.gemini/antigravity-cli/settings.json` の `modelProvider` を `gemini` にして、Google AI Studio で発行したキーを `GEMINI_API_KEY` に設定する。エージェント経由の自動化には公式が推奨するこの経路を使う）、(2) 利用者自身のスクリプト／CI から `agy` を直接呼び出すこと（subcon を介さない）、の2つ。
 警告は `SUBCON_NO_AUTH_WARNING=1` で消せる（自分の CI 等、使い方を把握している場合用）。
 
 ### サンドボックスの限界
