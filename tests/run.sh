@@ -2175,6 +2175,15 @@ test_authwarn_consumer_submit() {
   assert_eq "$(jobcount)" 1 jobs
 }
 
+test_authwarn_warning_wording() {
+  local h
+  h="$(auth_home consumer)"
+  HOME="$h" sub submit docs/t/01-a.md
+  assert_rc 0 || return 1
+  grep -q "suspension of your Google account" "$T/err" || fail "warning lacks account-wide scope: $(cat "$T/err")"
+  grep -q "call agy directly" "$T/err" || fail "warning lacks direct-call option: $(cat "$T/err")"
+}
+
 test_authwarn_api_key_run() {
   local h
   h="$(auth_home api-key)"
