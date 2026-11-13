@@ -793,7 +793,7 @@ test_commit_ok() {
   assert_eq "$(git rev-parse HEAD)" "$hash" head_is_new_commit
   [[ "$hash" != "$before" ]] || fail "HEAD did not move"
   assert_eq "$(git log -1 --format=%s)" "feat: fake change" subject
-  git log -1 --format=%B | grep -Fxq "Co-Authored-By: Gemini 3.8 Flash <noreply@google.com>" \
+  git log -1 --format=%B | grep -Fxq "Co-Authored-By: Gemini 4 Hydrogen <noreply@google.com>" \
     || fail "implementer trailer missing: $(git log -1 --format=%B)"
   git log -1 --format=%B | grep -Fxq "Reviewed-By: $REVIEWER" \
     || fail "reviewer trailer missing: $(git log -1 --format=%B)"
@@ -1739,7 +1739,7 @@ test_driver_trailer_latest_job() {
   assert_rc 0 || return 1
   subx trailer
   assert_rc 0 || return 1
-  assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
+  assert_match "$OUT" 'Gemini 4\. Hydrogen' trailer
   local fc
   fc="$(fake_claude_path)"
   SUBCON_DRIVER=claude PATH="$fc:$PATH" subx trailer
@@ -1756,7 +1756,7 @@ test_driver_trailer_latest_job_other_repo() {
 JSON
   subx trailer
   assert_rc 0 || return 1
-  assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
+  assert_match "$OUT" 'Gemini 4\. Hydrogen' trailer
 }
 
 test_driver_trailer_latest_job_same_second() {
@@ -2146,7 +2146,7 @@ test_preflight_fallback_run() {
   assert_eq "$(jget .status)" done status
   HOME="$h" PATH="$cp" sub trailer
   assert_rc 0 || return 1
-  assert_match "$OUT" 'Gemini 3\.8 Flash' trailer
+  assert_match "$OUT" 'Gemini 4\. Hydrogen' trailer
 }
 
 test_preflight_claude_fallback_run() {
