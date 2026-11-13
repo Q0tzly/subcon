@@ -57,6 +57,7 @@
 | 53 | checks 再計算コマンド `subcon checks`（issue #9） | Flash | `bin/subcon` `lib/manage.sh` `docs/spec/cli.md` `docs/spec/files.md` |
 | 54 | export の識別キー（エンベロープ `source`、ジョブ行 `repo_slug`）（issue #11） | Flash | `lib/export.sh` `lib/history.sh` `docs/spec/files.md` |
 | 55 | agy ドライバの allow に `read_file`（ジョブ dir＋repo の親）を追加（issue #17） | Flash | `drivers/agy` |
+| 56 | agy の既定モデルを Hydrogen に切替（issue #1 の判断） | Flash | `drivers/agy` `README.md` `docs/delegation.md` `docs/spec/cli.md` `docs/design/driver-layer.md` `docs/design/v2.md` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す

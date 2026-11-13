@@ -285,7 +285,7 @@ test_submit_ok() {
   assert_eq "$(jq -r .repo "$d/meta.json")" "$TOP" meta.repo
   assert_eq "$(jq -r .ticket "$d/meta.json")" docs/t/01-a.md meta.ticket
   assert_eq "$(jq -r .runner "$d/meta.json")" local meta.runner
-  assert_eq "$(jq -r .model "$d/meta.json")" gemini-3.8-flash-medium meta.model
+  assert_eq "$(jq -r .model "$d/meta.json")" gemini-4-hydrogen-medium meta.model
   assert_eq "$(jq -r .timeout "$d/meta.json")" 30m meta.timeout
   assert_match "$(jq -r .created_at "$d/meta.json")" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' meta.created_at
   cmp -s "$d/ticket.md" docs/t/01-a.md || fail "ticket.md differs"
@@ -1142,7 +1142,7 @@ test_history_job_line() {
   assert_eq "$(jq -r .id <<<"$l")" "$id" id
   assert_eq "$(jq -r .repo <<<"$l")" "$TOP" repo
   assert_eq "$(jq -r .ticket <<<"$l")" docs/t/01-a.md ticket
-  assert_eq "$(jq -r .model <<<"$l")" gemini-3.8-flash-medium model
+  assert_eq "$(jq -r .model <<<"$l")" gemini-4-hydrogen-medium model
   assert_eq "$(jq -r .runner <<<"$l")" local runner
   assert_eq "$(jq -r .created_at <<<"$l")" "$(jq -r .created_at "$(jobdir "$id")/meta.json")" created_at
   assert_match "$(jq -r .finished_at <<<"$l")" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' finished_at
