@@ -89,7 +89,7 @@ stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは 
 ## 委任の実行
 
 - ジョブは発行時の `HEAD` から専用の worktree で動き、上位の作業ツリーには触らない。待っている間も上位は作業を続けられる
-- 既定のモデルは `gemini-3.8-flash-medium`。量が多い・難しめの票は `--model gemini-3.8-flash-high`
+- 既定のモデルは `gemini-4-hydrogen-medium`。量が多い・難しめの票は `--model gemini-4-hydrogen-high`
 - `subcon list` でこのリポジトリのジョブ一覧、`subcon show <id>` で 1 件
 
 | 終了コード | 意味 | 次にやること |

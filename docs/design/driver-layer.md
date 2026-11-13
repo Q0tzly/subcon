@@ -128,7 +128,7 @@ subcon の実装役は現在 agy 前提に固定されている。「どこで�
   前方互換が既にあるため、形式の版は上げない。
 - モデル: `SUBCON_MODEL` / `--model` の意味は「選択中ドライバのモデル ID」
   に変わる。未指定時の既定モデルはドライバごとに持つ
-  （agy: `gemini-3.8-flash-medium`、claude: `claude-haiku-5-5`）。
+  （agy: `gemini-4-hydrogen-medium`、claude: `claude-haiku-5-5`）。
 - 認証警告: 消費者ログイン警告は agy ドライバ選択時のみ（現行どおり）。
   claude ドライバでは `preflight` が `claude auth status` のログイン状態を見る。
 

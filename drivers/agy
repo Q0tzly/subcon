@@ -17,7 +17,7 @@ case "${1:-}" in
     exit 0
     ;;
   models) exec agy models ;;
-  default-model) echo gemini-3.8-flash-medium; exit 0 ;;
+  default-model) echo gemini-4-hydrogen-medium; exit 0 ;;
 esac
 
 job_dir="${1:?job directory required}"

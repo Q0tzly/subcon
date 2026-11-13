@@ -37,7 +37,7 @@ subcon trailer                     # コミット用の Co-Authored-By 行
 
 実装役は `--driver <name>` または環境変数 `SUBCON_DRIVER` で選ぶ。既定は `agy`。
 
-- `agy`: Gemini Flash（既定モデル `gemini-3.8-flash-medium`）。
+- `agy`: Gemini Flash（既定モデル `gemini-4-hydrogen-medium`）。
 - `claude`: Claude Code（既定モデル `claude-haiku-5-5`）。
 - `opencode`: OpenCode CLI（`opencode` が PATH に必要）。モデルは `provider/model` 形式で任意に指定できる（既定は `sakura/preview/Kimi-K2.7-Code`、環境変数 `SUBCON_OPENCODE_DEFAULT_MODEL` で変更可）。プロバイダ設定（opencode.json）は利用者側で用意する。
 - `container` / `ci` ランナーは `agy` と `claude` ドライバに対応（`container` + `claude` は `ANTHROPIC_API_KEY`、`ci` + `claude` はランナーマシン側の setup-token または API キーが必要）。
