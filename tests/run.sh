@@ -1739,7 +1739,7 @@ test_driver_trailer_latest_job() {
   assert_rc 0 || return 1
   subx trailer
   assert_rc 0 || return 1
-  assert_match "$OUT" 'Gemini 4\. Hydrogen' trailer
+  assert_match "$OUT" 'Gemini 4 Hydrogen' trailer
   local fc
   fc="$(fake_claude_path)"
   SUBCON_DRIVER=claude PATH="$fc:$PATH" subx trailer
@@ -1756,7 +1756,7 @@ test_driver_trailer_latest_job_other_repo() {
 JSON
   subx trailer
   assert_rc 0 || return 1
-  assert_match "$OUT" 'Gemini 4\. Hydrogen' trailer
+  assert_match "$OUT" 'Gemini 4 Hydrogen' trailer
 }
 
 test_driver_trailer_latest_job_same_second() {
@@ -2146,7 +2146,7 @@ test_preflight_fallback_run() {
   assert_eq "$(jget .status)" done status
   HOME="$h" PATH="$cp" sub trailer
   assert_rc 0 || return 1
-  assert_match "$OUT" 'Gemini 4\. Hydrogen' trailer
+  assert_match "$OUT" 'Gemini 4 Hydrogen' trailer
 }
 
 test_preflight_claude_fallback_run() {
