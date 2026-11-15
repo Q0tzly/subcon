@@ -265,13 +265,109 @@ review_conduct() {
   return 0
 }
 
+# ---- subcon review --target and subcon reviews (ticket 61) -------------------
+
+# review_target_check <path>: 0 if <path> is a file committed in HEAD and written as a repo-relative path;
+# else 1 with one line on stderr that names <path>.
+review_target_check() {
+  local t="$1" reason=""
+  if [[ "$t" == /* ]]; then
+    reason="not a path relative to the repository root"
+  elif [[ "/$t/" == *//* || "/$t/" == */./* || "/$t/" == */../* ]]; then
+    reason="contains an empty, . or .. element"
+  elif [[ "$t" == *[\*\?\[]* ]]; then
+    reason="contains a glob character (* ? [)"
+  elif ! git cat-file -e "HEAD:$t" 2>/dev/null || [[ "$(git cat-file -t "HEAD:$t" 2>/dev/null)" != blob ]]; then
+    reason="not a file committed in HEAD"
+  fi
+  if [[ -n "$reason" ]]; then
+    echo "subcon: invalid review target $t: $reason" >&2
+    return 1
+  fi
+  return 0
+}
+
+# review_new_id: <YYYYmmdd-HHMMSS>-<4 hex> (UTC) that no review directory uses yet.
+review_new_id() {
+  local id
+  while :; do
+    id="$(date -u +%Y%m%d-%H%M%S)-$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
+    [[ -e "$(state_root)/reviews/$id" ]] || break
+  done
+  echo "$id"
+}
+
+# review_target_prompt <brief-or-empty> <out> <target>...: the instructions, then the targets and the brief.
+review_target_prompt() {
+  local brief="$1" out="$2" t
+  shift 2
+  {
+    cat "$SUBCON_REVIEW_PROMPT"
+    printf '\n\n--- REVIEW TARGET: files of the current directory ---\n\n'
+    printf 'The current directory is a snapshot of the HEAD commit of the repository, with no uncommitted changes.\n'
+    printf 'git is not available: read the files with cat, rg and sed.\n\n'
+    printf '## Targets\n\n'
+    for t in "$@"; do printf -- '- %s\n' "$t"; done
+    printf '\n## Brief\n\n'
+    if [[ -n "$brief" ]]; then
+      cat "$brief"
+    else
+      printf 'Review the target files for errors, inconsistencies, gaps and weak points.\n'
+    fi
+  } > "$out"
+}
+
+# review_target_run <driver> <model> <timeout> <brief-or-empty> <target>...: review files of HEAD.
+# Returns the exit code of review_conduct, or 1 when a target is not a file of HEAD (nothing is created then).
+review_target_run() {
+  local driver="$1" model="$2" timeout="$3" brief="$4"
+  shift 4
+  review_pick "$driver" "$model"
+
+  local t bad=0
+  for t in "$@"; do
+    review_target_check "$t" || bad=1
+  done
+  [[ "$bad" -eq 0 ]] || return 1
+
+  local repo head_sha review_id store targets_json extra snapshot="" rc=0
+  repo="$(repo_top)"
+  head_sha="$(git rev-parse HEAD)"
+  review_id="$(review_new_id)"
+  store="$(state_root)/reviews/$review_id"
+  targets_json="$(jq -cn '$ARGS.positional' --args -- "$@")"
+  extra="$(jq -cn --arg head "$head_sha" --argjson targets "$targets_json" --arg brief "$brief" \
+    '{head: $head, targets: $targets, brief: (if $brief == "" then null else $brief end)}')"
+
+  review_workarea
+  if ! snapshot="$(review_snapshot "$repo" HEAD "$REVIEW_TMP/clone" 2>"$REVIEW_TMP/snapshot.err")"; then
+    local err meta
+    err="failed to prepare the review snapshot: $(head -c 300 "$REVIEW_TMP/snapshot.err" | tr '\n' ' ')"
+    mkdir -p "$store"
+    meta="$(jq -cn --arg id "$review_id" --arg repo "$repo" --arg driver "$REVIEW_DRIVER" --arg model "$REVIEW_MODEL" \
+      --arg e "$err" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson extra "$extra" '{
+        v: 1, id: $id, job_id: null, target_type: "target", repo: $repo, created_at: $at, driver: $driver, model: $model,
+        duration_seconds: null, cost_usd: null, usage: null, error: $e
+      } + $extra')"
+    review_store "$store" review "$meta" ""
+    json_out '{id: $id, verdict: null, error: $e, path: null}' --arg id "$review_id" --arg e "$err"
+    return 4
+  fi
+  review_target_prompt "$brief" "$REVIEW_TMP/driver/prompt.txt" "$@"
+  review_conduct "$snapshot" "$store" review "$review_id" "" target "$repo" "$timeout" "$extra" || rc=$?
+  return "$rc"
+}
+
 cmd_review() {
-  local driver="" model="" timeout="$SUBCON_DEFAULT_TIMEOUT" id=""
+  local driver="" model="" timeout="$SUBCON_DEFAULT_TIMEOUT" id="" brief="" brief_given=0
+  local targets=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --driver) [[ $# -ge 2 ]] || die "--driver requires a value"; driver="$2"; shift 2 ;;
       --model) [[ $# -ge 2 ]] || die "--model requires a value"; model="$2"; shift 2 ;;
       --timeout) [[ $# -ge 2 ]] || die "--timeout requires a value"; timeout="$2"; shift 2 ;;
+      --target) [[ $# -ge 2 ]] || die "--target requires a value"; targets+=("$2"); shift 2 ;;
+      --brief) [[ $# -ge 2 ]] || die "--brief requires a value"; brief="$2"; brief_given=1; shift 2 ;;
       -*) die "unknown option: $1" ;;
       *)
         [[ -z "$id" ]] || die "unexpected argument: $1"
@@ -280,6 +376,17 @@ cmd_review() {
         ;;
     esac
   done
+
+  if [[ ${#targets[@]} -gt 0 ]]; then
+    [[ -z "$id" ]] || die "a job id cannot be combined with --target"
+    if [[ $brief_given -eq 1 ]]; then
+      [[ -f "$brief" && -r "$brief" ]] || die "cannot read brief file: $brief"
+    fi
+    local target_rc=0
+    review_target_run "$driver" "$model" "$timeout" "$brief" "${targets[@]}" || target_rc=$?
+    return "$target_rc"
+  fi
+  [[ $brief_given -eq 0 ]] || die "--brief requires --target"
   [[ -n "$id" ]] || die "job id required"
 
   local dir
@@ -314,4 +421,60 @@ cmd_review() {
   review_job_prompt "$dir" "$REVIEW_TMP/driver/prompt.txt"
   review_conduct "$snapshot" "$dir" "review-$n" "$id-r$n" "$id" job "$cur_repo" "$timeout" || rc=$?
   return "$rc"
+}
+
+# review_summary <result-file>: {"verdict","s1","s2","s3","path"} for a validated result file.
+review_summary() {
+  local file="$1" verdict counts
+  verdict="$(jq -r .verdict "$file")"
+  counts="$(review_counts "$file")"
+  jq -cn --arg v "$verdict" --argjson c "$counts" --arg p "$file" \
+    '{verdict: $v, s1: $c.s1, s2: $c.s2, s3: $c.s3, path: $p}'
+}
+
+# review_list_entry <meta> <repo>: the meta with verdict, s1-s3 and path added, as one JSON line.
+# Prints nothing for a file that is not a review meta of <repo>. A missing or invalid result gives nulls.
+review_list_entry() {
+  local meta="$1" repo="$2" base res summary
+  base="${meta##*/}"
+  [[ "$base" =~ ^review(-[0-9]+)?\.meta\.json$ ]] || return 0
+  jq -e --arg r "$repo" '.repo == $r' "$meta" >/dev/null 2>&1 || return 0
+  res="${meta%.meta.json}.json"
+  summary='{"verdict":null,"s1":null,"s2":null,"s3":null,"path":null}'
+  if review_validate "$res" 2>/dev/null; then
+    summary="$(review_summary "$res")"
+  fi
+  jq -c --argjson r "$summary" '. + $r' "$meta"
+}
+
+cmd_reviews() {
+  local id="" cur_repo dir job_repo f out=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) die "unknown option: $1" ;;
+      *)
+        [[ -z "$id" ]] || die "unexpected argument: $1"
+        id="$1"
+        shift
+        ;;
+    esac
+  done
+
+  cur_repo="$(repo_top)"
+  if [[ -n "$id" ]]; then
+    dir="$(job_dir "$id")"
+    [[ -d "$dir" ]] || die "unknown job id: $id"
+    job_repo="$(jq -r .repo "$dir/meta.json" 2>/dev/null || echo "")"
+    [[ "$job_repo" == "$cur_repo" ]] || die "job repository ($job_repo) does not match current repository ($cur_repo)"
+    for f in "$dir"/review-*.meta.json; do
+      [[ -e "$f" ]] || continue
+      out+="$(review_list_entry "$f" "$cur_repo")"$'\n'
+    done
+  else
+    for f in "$(jobs_dir)"/*/review-*.meta.json "$(state_root)"/reviews/*/review.meta.json; do
+      [[ -e "$f" ]] || continue
+      out+="$(review_list_entry "$f" "$cur_repo")"$'\n'
+    done
+  fi
+  printf '%s' "$out" | jq -sc 'sort_by([.created_at, .id]) | reverse'
 }
