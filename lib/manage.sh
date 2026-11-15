@@ -334,6 +334,35 @@ Co-Authored-By: $SUBCON_REVIEWER"
   commit_msg="$commit_msg
 Reviewed-By: $SUBCON_REVIEWER"
 
+  # The latest review (ticket 62) adds its reviewer. An unreadable review counts as absent.
+  local rv_file rv_n rv_meta rv_verdict rv_counts rv_s1 rv_driver rv_model rv_name rv_line
+  if rv_file="$(review_latest "$dir")"; then
+    rv_n="${rv_file##*/}"
+    rv_n="${rv_n#review-}"
+    rv_n="${rv_n%.json}"
+    rv_meta="$dir/review-$rv_n.meta.json"
+    if jq -e 'type == "object"' "$rv_meta" >/dev/null 2>&1 \
+      && rv_verdict="$(jq -r 'select(.verdict == "approve" or .verdict == "changes" or .verdict == "reject") | .verdict' "$rv_file" 2>/dev/null)" \
+      && [[ -n "$rv_verdict" ]] \
+      && rv_counts="$(review_counts "$rv_file" 2>/dev/null)"; then
+      rv_s1="$(jq -r .s1 <<<"$rv_counts")"
+      if [[ "$rv_s1" -gt 0 ]]; then
+        echo "subcon: warning: the latest review (review-$rv_n) has $rv_s1 S1 finding(s)" >&2
+      fi
+      if [[ "$rv_verdict" != reject ]]; then
+        rv_driver="$(jq -r '.driver // empty' "$rv_meta")"
+        rv_model="$(jq -r '.model // empty' "$rv_meta")"
+        rv_name="$(model_name "$rv_model" "$rv_driver" 2>/dev/null || true)"
+        rv_name="${rv_name:-$rv_model}"
+        rv_line="Reviewed-By: $rv_name <$(coauthor_email "$rv_name")>"
+        if [[ -n "$rv_name" && "$rv_line" != "Reviewed-By: $SUBCON_REVIEWER" ]]; then
+          commit_msg="$commit_msg
+$rv_line"
+        fi
+      fi
+    fi
+  fi
+
   local issue_repo issue_num
   issue_repo="$(jq -r '.issue.repo // empty' "$dir/meta.json" 2>/dev/null || echo "")"
   issue_num="$(jq -r '.issue.number // empty' "$dir/meta.json" 2>/dev/null || echo "")"
