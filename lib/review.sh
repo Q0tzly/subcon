@@ -229,6 +229,9 @@ review_conduct() {
     error="reviewer modified files"
   elif [[ ! -s "$agy" ]] || ! jq -e . "$agy" >/dev/null 2>&1; then
     error="driver produced no result (exit $driver_rc)"
+    local why
+    why="$(tail -n 1 "$tmp/driver/log" 2>/dev/null | head -c 200)"
+    [[ -z "$why" ]] || error="$error: $why"
   elif [[ "$(jq -r '.status // empty' "$agy")" != SUCCESS || "$driver_rc" -ne 0 ]]; then
     error="$(jq -r '.error // empty' "$agy")"
     [[ -n "$error" ]] || error="driver failed (exit $driver_rc)"

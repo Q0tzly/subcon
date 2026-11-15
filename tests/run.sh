@@ -3309,6 +3309,14 @@ test_reviewjob_concurrent_reviews_get_distinct_numbers() {
   assert_eq "$(cat "$T/o1" "$T/o2" | jq -r .id | sort | tr '\n' ' ')" "$ID-r1 $ID-r2 " ids
 }
 
+test_reviewjob_opencode_refusal_is_explained() {
+  finished_job || return 1
+  rtmp
+  PATH="$(opencode_path):$PATH" sub review --driver opencode "$ID"
+  assert_rc 4 || return 1
+  assert_match "$(jget .error)" 'not supported' error
+}
+
 test_reviewjob_unknown_and_unfinished() {
   sub review
   assert_rc 1 || return 1
