@@ -181,18 +181,89 @@ review_run_driver() {
   return "$rc"
 }
 
-# review_store <store-dir> <prefix> <n> <meta-json> [<result-file>]: write <prefix><n>.json (only when there is
-# a result) and then <prefix><n>.meta.json, so a numbered meta without a result marks a failed review.
+# review_store <store-dir> <base> <meta-json> [<result-file>]: write <base>.json (only when there is a result)
+# and then <base>.meta.json, so a meta without a result marks a failed review.
 review_store() {
-  local store="$1" prefix="$2" n="$3" meta="$4" result="${5:-}"
+  local store="$1" base="$2" meta="$3" result="${4:-}"
   if [[ -n "$result" ]]; then
-    cp "$result" "$store/$prefix$n.json.tmp" && mv -f "$store/$prefix$n.json.tmp" "$store/$prefix$n.json"
+    cp "$result" "$store/$base.json.tmp" && mv -f "$store/$base.json.tmp" "$store/$base.json"
   fi
-  printf '%s\n' "$meta" | atomic_write "$store/$prefix$n.meta.json"
+  printf '%s\n' "$meta" | atomic_write "$store/$base.meta.json"
 }
 
-# cmd_review drives these steps for a job; the --target mode (ticket 61) reuses review_pick, review_snapshot,
-# review_run_driver, review_untouched and review_store.
+# review_workarea: create a work area in REVIEW_TMP and remove it (and stop a running driver) on exit or TERM.
+review_workarea() {
+  REVIEW_TMP="$(mktemp -d "${TMPDIR:-/tmp}/subcon-review.XXXXXX")" || die "cannot create a work area"
+  REVIEW_CHILD=""
+  # shellcheck disable=SC2064
+  trap 'trap - EXIT INT TERM HUP; [[ -z "${REVIEW_CHILD:-}" ]] || review_kill_tree "$REVIEW_CHILD"; rm -rf "'"$REVIEW_TMP"'"; exit 143' INT TERM HUP
+  # shellcheck disable=SC2064
+  trap 'rm -rf "'"$REVIEW_TMP"'"' EXIT
+  mkdir -p "$REVIEW_TMP/driver"
+}
+
+# review_conduct <snapshot> <store> <base> <review-id> <job-id|""> <target_type> <repo> <timeout> [<extra-meta-json>]
+# Runs the reviewer in $REVIEW_TMP/clone (at <snapshot>) with the prompt in $REVIEW_TMP/driver/prompt.txt,
+# checks the clone and the result, and stores <store>/<base>.json (only on success), <base>.meta.json and
+# <base>.stream. <extra-meta-json> is merged into the meta. Prints one JSON line and returns 0, 2 (S1) or 4.
+review_conduct() {
+  local snapshot="$1" store="$2" base="$3" review_id="$4" job_id="$5" target_type="$6" repo="$7" timeout="$8" extra="${9:-}"
+  [[ -n "$extra" ]] || extra='{}'
+  local tmp="$REVIEW_TMP" created_at error="" driver_rc=0
+  created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -cn --arg repo "$tmp/clone" '{repo: $repo}' > "$tmp/driver/meta.json"
+  review_run_driver "$tmp/clone" "$tmp/driver" "$timeout" || driver_rc=$?
+
+  local agy="$tmp/driver/agy.json" result="$tmp/driver/review.json"
+  if ! review_untouched "$tmp/clone" "$snapshot"; then
+    error="reviewer modified files"
+  elif [[ ! -s "$agy" ]] || ! jq -e . "$agy" >/dev/null 2>&1; then
+    error="driver produced no result (exit $driver_rc)"
+  elif [[ "$(jq -r '.status // empty' "$agy")" != SUCCESS || "$driver_rc" -ne 0 ]]; then
+    error="$(jq -r '.error // empty' "$agy")"
+    [[ -n "$error" ]] || error="driver failed (exit $driver_rc)"
+  elif ! jq -e '.structured_output | type == "object"' "$agy" >/dev/null 2>&1; then
+    error="driver returned no structured output"
+  else
+    jq -c .structured_output "$agy" > "$result"
+    error="$(review_validate "$result" 2>&1 >/dev/null)" || true
+    if [[ -n "$error" ]]; then
+      rm -f "$result"
+      error="${error#review: }"
+    fi
+  fi
+
+  local meta_agy="null"
+  [[ -s "$agy" ]] && jq -e . "$agy" >/dev/null 2>&1 && meta_agy="$(cat "$agy")"
+  local meta
+  meta="$(jq -cn --argjson agy "$meta_agy" --argjson extra "$extra" --arg id "$review_id" --arg job "$job_id" \
+    --arg tt "$target_type" --arg repo "$repo" --arg at "$created_at" --arg driver "$REVIEW_DRIVER" \
+    --arg model "$REVIEW_MODEL" --arg err "$error" '{
+      v: 1, id: $id, job_id: (if $job == "" then null else $job end), target_type: $tt, repo: $repo,
+      created_at: $at, driver: $driver, model: $model,
+      duration_seconds: ($agy.duration_seconds? // null), cost_usd: ($agy.cost_usd? // null), usage: ($agy.usage? // null),
+      error: (if $err == "" then null else $err end)
+    } + $extra')"
+
+  mkdir -p "$store"
+  [[ ! -f "$tmp/driver/agy.stream" ]] || cp "$tmp/driver/agy.stream" "$store/$base.stream"
+
+  if [[ -n "$error" ]]; then
+    review_store "$store" "$base" "$meta" ""
+    json_out '{id: $id, verdict: null, error: $e, path: null}' --arg id "$review_id" --arg e "$error"
+    return 4
+  fi
+
+  review_store "$store" "$base" "$meta" "$result"
+  ( history_append_review "$store/$base.meta.json" "$store/$base.json" ) || echo "subcon: failed to record history for $review_id" >&2
+
+  local counts
+  counts="$(review_counts "$store/$base.json")"
+  json_out '{id: $id, verdict: $v, s1: $c.s1, s2: $c.s2, s3: $c.s3, path: $p}' \
+    --arg id "$review_id" --arg v "$(jq -r .verdict "$store/$base.json")" --argjson c "$counts" --arg p "$store/$base.json"
+  [[ "$(jq -r .s1 <<<"$counts")" -eq 0 ]] || return 2
+  return 0
+}
 
 cmd_review() {
   local driver="" model="" timeout="$SUBCON_DEFAULT_TIMEOUT" id=""
@@ -226,79 +297,21 @@ cmd_review() {
 
   review_pick "$driver" "$model"
 
-  local n review_id created_at base tmp snapshot=""
+  local n snapshot="" rc=0
   n="$(review_next_n "$dir")"
-  review_id="$id-r$n"
-  created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  base="$(jq -r .base "$dir/meta.json")"
-
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/subcon-review.XXXXXX")" || die "cannot create a work area"
-  REVIEW_CHILD=""
-  # shellcheck disable=SC2064
-  trap 'trap - EXIT INT TERM HUP; [[ -z "${REVIEW_CHILD:-}" ]] || review_kill_tree "$REVIEW_CHILD"; rm -rf "'"$tmp"'"; exit 143' INT TERM HUP
-  # shellcheck disable=SC2064
-  trap 'rm -rf "'"$tmp"'"' EXIT
-
-  mkdir -p "$tmp/driver"
-  local error="" snapshot_err
-  if ! snapshot="$(review_snapshot "$cur_repo" "$base" "$tmp/clone" "$dir/patch.diff" 2>"$tmp/snapshot.err")"; then
-    snapshot_err="$(head -c 300 "$tmp/snapshot.err" | tr '\n' ' ')"
-    error="failed to prepare the review snapshot: $snapshot_err"
-  fi
-
-  local driver_rc=0
-  if [[ -z "$error" ]]; then
-    jq -cn --arg repo "$tmp/clone" '{repo: $repo}' > "$tmp/driver/meta.json"
-    review_job_prompt "$dir" "$tmp/driver/prompt.txt"
-    review_run_driver "$tmp/clone" "$tmp/driver" "$timeout" || driver_rc=$?
-  fi
-
-  local agy="$tmp/driver/agy.json" result="$tmp/driver/review.json"
-  if [[ -z "$error" ]]; then
-    if ! review_untouched "$tmp/clone" "$snapshot"; then
-      error="reviewer modified files"
-    elif [[ ! -s "$agy" ]] || ! jq -e . "$agy" >/dev/null 2>&1; then
-      error="driver produced no result (exit $driver_rc)"
-    elif [[ "$(jq -r '.status // empty' "$agy")" != SUCCESS || "$driver_rc" -ne 0 ]]; then
-      error="$(jq -r '.error // empty' "$agy")"
-      [[ -n "$error" ]] || error="driver failed (exit $driver_rc)"
-    elif ! jq -e '.structured_output | type == "object"' "$agy" >/dev/null 2>&1; then
-      error="driver returned no structured output"
-    else
-      jq -c .structured_output "$agy" > "$result"
-      error="$(review_validate "$result" 2>&1 >/dev/null)" || true
-      if [[ -n "$error" ]]; then
-        rm -f "$result"
-        error="${error#review: }"
-      fi
-    fi
-  fi
-
-  local meta_agy="null"
-  [[ -s "$agy" ]] && jq -e . "$agy" >/dev/null 2>&1 && meta_agy="$(cat "$agy")"
-  local meta
-  meta="$(jq -cn --argjson agy "$meta_agy" --arg id "$review_id" --arg job "$id" --arg repo "$cur_repo" \
-    --arg at "$created_at" --arg driver "$REVIEW_DRIVER" --arg model "$REVIEW_MODEL" --arg err "$error" '{
-      v: 1, id: $id, job_id: $job, target_type: "job", repo: $repo, created_at: $at, driver: $driver, model: $model,
-      duration_seconds: ($agy.duration_seconds? // null), cost_usd: ($agy.cost_usd? // null), usage: ($agy.usage? // null),
-      error: (if $err == "" then null else $err end)
-    }')"
-
-  [[ ! -f "$tmp/driver/agy.stream" ]] || cp "$tmp/driver/agy.stream" "$dir/review-$n.stream"
-
-  if [[ -n "$error" ]]; then
-    review_store "$dir" review- "$n" "$meta" ""
-    json_out '{id: $id, verdict: null, error: $e, path: null}' --arg id "$review_id" --arg e "$error"
+  review_workarea
+  if ! snapshot="$(review_snapshot "$cur_repo" "$(jq -r .base "$dir/meta.json")" "$REVIEW_TMP/clone" "$dir/patch.diff" 2>"$REVIEW_TMP/snapshot.err")"; then
+    local err
+    err="failed to prepare the review snapshot: $(head -c 300 "$REVIEW_TMP/snapshot.err" | tr '\n' ' ')"
+    mkdir -p "$dir"
+    review_store "$dir" "review-$n" "$(jq -cn --arg id "$id-r$n" --arg job "$id" --arg repo "$cur_repo" --arg driver "$REVIEW_DRIVER" \
+      --arg model "$REVIEW_MODEL" --arg e "$err" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{v: 1, id: $id, job_id: $job, target_type: "job", repo: $repo, created_at: $at, driver: $driver, model: $model,
+        duration_seconds: null, cost_usd: null, usage: null, error: $e}')" ""
+    json_out '{id: $id, verdict: null, error: $e, path: null}' --arg id "$id-r$n" --arg e "$err"
     return 4
   fi
-
-  review_store "$dir" review- "$n" "$meta" "$result"
-  ( history_append_review "$dir/review-$n.meta.json" "$dir/review-$n.json" ) || echo "subcon: failed to record history for $review_id" >&2
-
-  local counts
-  counts="$(review_counts "$dir/review-$n.json")"
-  json_out '{id: $id, verdict: $v, s1: $c.s1, s2: $c.s2, s3: $c.s3, path: $p}' \
-    --arg id "$review_id" --arg v "$(jq -r .verdict "$dir/review-$n.json")" --argjson c "$counts" --arg p "$dir/review-$n.json"
-  [[ "$(jq -r .s1 <<<"$counts")" -eq 0 ]] || return 2
-  return 0
+  review_job_prompt "$dir" "$REVIEW_TMP/driver/prompt.txt"
+  review_conduct "$snapshot" "$dir" "review-$n" "$id-r$n" "$id" job "$cur_repo" "$timeout" || rc=$?
+  return "$rc"
 }
