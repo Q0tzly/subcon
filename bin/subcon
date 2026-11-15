@@ -26,6 +26,7 @@ usage: subcon new <feature>/<NN-name>
        subcon apply <id>
        subcon commit -m <message> [--edited] <id>
        subcon checks <id>
+       subcon review [--driver D] [--model M] [--timeout T] <job-id>
        subcon reject -m <reason> [--model M] [--runner R] <id>
        subcon discard <id>...
        subcon stats [--all] [--since <N>d|<N>h] [--text]
@@ -56,6 +57,7 @@ case "$cmd" in
   apply) cmd_apply "$@" ;;
   commit) cmd_commit "$@" ;;
   checks) cmd_checks "$@" ;;
+  review) cmd_review "$@" ;;
   reject) cmd_reject "$@" ;;
   discard) cmd_discard "$@" ;;
   stats) cmd_stats "$@" ;;

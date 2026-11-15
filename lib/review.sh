@@ -85,3 +85,220 @@ review_latest() {
   [[ -n "$best" ]] || return 1
   echo "$best"
 }
+
+# ---- subcon review <job-id> -------------------------------------------------
+# Design: docs/design/reviewer.md. The reviewer runs in a throwaway clone of the job's base with the
+# patch applied and committed, and the result is accepted only if the clone is exactly as it was left.
+
+SUBCON_REVIEW_SCHEMA="$SUBCON_ROOT/schema/review.schema.json"
+SUBCON_REVIEW_PROMPT="$SUBCON_ROOT/lib/review-prompt.md"
+REVIEW_SNAPSHOT_MESSAGE="subcon: review snapshot"
+
+# review_kill_tree <pid>: stop the process and its descendants, children first.
+review_kill_tree() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    review_kill_tree "$child"
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+# review_pick <flag-driver> <flag-model>: resolve the reviewer's driver and model into REVIEW_DRIVER and
+# REVIEW_MODEL: flag > SUBCON_REVIEW_DRIVER / SUBCON_REVIEW_MODEL > the driver's default (Hydrogen for agy).
+# The implementer's SUBCON_DRIVER / SUBCON_MODEL are not used.
+review_pick() {
+  local flag_driver="$1" flag_model="$2"
+  REVIEW_DRIVER="${flag_driver:-${SUBCON_REVIEW_DRIVER:-agy}}"
+  require_driver "$REVIEW_DRIVER"
+  REVIEW_MODEL="${flag_model:-${SUBCON_REVIEW_MODEL:-}}"
+  if [[ -z "$REVIEW_MODEL" ]]; then
+    if [[ "$REVIEW_DRIVER" == agy ]]; then
+      REVIEW_MODEL="gemini-4-hydrogen-high"
+    else
+      REVIEW_MODEL="$("$(driver_path "$REVIEW_DRIVER")" default-model)"
+    fi
+  fi
+  [[ "$REVIEW_DRIVER" != agy ]] || warn_consumer_auth
+}
+
+# review_snapshot <repo> <rev> <dest> [<patch>]: clone <repo> into <dest> at <rev> without sharing .git,
+# apply <patch> when it is not empty, and commit the result. Prints the snapshot commit.
+review_snapshot() {
+  local repo="$1" rev="$2" dest="$3" patch="${4:-}"
+  git clone -q --local --no-checkout "$repo" "$dest" 2>&1 || return 1
+  git -C "$dest" checkout -q --detach "$rev" 2>&1 || return 1
+  if [[ -n "$patch" && -s "$patch" ]]; then
+    git -C "$dest" apply --binary "$patch" 2>&1 || return 1
+  fi
+  git -C "$dest" add -A 2>&1 || return 1
+  git -C "$dest" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=subcon -c user.email=subcon@localhost \
+    commit -q --allow-empty --no-verify -m "$REVIEW_SNAPSHOT_MESSAGE" 2>&1 || return 1
+  git -C "$dest" rev-parse HEAD
+}
+
+# review_untouched <clone> <commit>: 0 if the clone is still at <commit> with nothing changed or added.
+review_untouched() {
+  local clone="$1" commit="$2"
+  [[ "$(git -C "$clone" rev-parse HEAD 2>/dev/null)" == "$commit" ]] || return 1
+  [[ -z "$(git -C "$clone" status --porcelain --ignored 2>/dev/null)" ]]
+}
+
+# review_job_prompt <job-dir> <out>: the instructions, then the ticket, checks, report and patch of the job.
+review_job_prompt() {
+  local dir="$1" out="$2"
+  {
+    cat "$SUBCON_REVIEW_PROMPT"
+    printf '\n\n--- REVIEW TARGET: a change made for one ticket ---\n\n'
+    printf 'The change is already applied and committed as the last commit of the current directory\n'
+    printf '(the commit before it is the base). git is not available: read files with cat, rg and sed,\n'
+    printf 'and use the patch below to see what changed.\n\n'
+    printf '## Ticket\n\n'
+    cat "$dir/ticket.md"
+    printf '\n\n## Checks\n\n'
+    jq '.checks' "$dir/result.json"
+    printf '\n## Implementer report\n\n'
+    jq '.report' "$dir/result.json"
+    printf '\n## Patch\n\n'
+    if [[ -s "$dir/patch.diff" ]]; then cat "$dir/patch.diff"; else echo "(empty patch)"; fi
+  } > "$out"
+}
+
+# review_run_driver <work-dir> <driver-dir> <timeout>: run REVIEW_DRIVER in the review role inside <work-dir>.
+# Returns the driver's exit code. REVIEW_CHILD holds its pid so a TERM trap can stop the process tree.
+review_run_driver() {
+  local work="$1" ddir="$2" timeout="$3" pid rc=0
+  (
+    cd "$work"
+    export SUBCON_ROLE=review SUBCON_PROMPT_FILE="$ddir/prompt.txt" SUBCON_JOB_MODEL="$REVIEW_MODEL" \
+      SUBCON_TIMEOUT="$timeout" SUBCON_SCHEMA="$SUBCON_REVIEW_SCHEMA" SUBCON_DRIVER="$REVIEW_DRIVER"
+    unset SUBCON_CONVERSATION
+    exec "$(driver_path "$REVIEW_DRIVER")" "$ddir"
+  ) >>"$ddir/log" 2>&1 &
+  pid=$!
+  REVIEW_CHILD="$pid"
+  wait "$pid" || rc=$?
+  REVIEW_CHILD=""
+  return "$rc"
+}
+
+# review_store <store-dir> <prefix> <n> <meta-json> [<result-file>]: write <prefix><n>.json (only when there is
+# a result) and then <prefix><n>.meta.json, so a numbered meta without a result marks a failed review.
+review_store() {
+  local store="$1" prefix="$2" n="$3" meta="$4" result="${5:-}"
+  if [[ -n "$result" ]]; then
+    cp "$result" "$store/$prefix$n.json.tmp" && mv -f "$store/$prefix$n.json.tmp" "$store/$prefix$n.json"
+  fi
+  printf '%s\n' "$meta" | atomic_write "$store/$prefix$n.meta.json"
+}
+
+# cmd_review drives these steps for a job; the --target mode (ticket 61) reuses review_pick, review_snapshot,
+# review_run_driver, review_untouched and review_store.
+
+cmd_review() {
+  local driver="" model="" timeout="$SUBCON_DEFAULT_TIMEOUT" id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --driver) [[ $# -ge 2 ]] || die "--driver requires a value"; driver="$2"; shift 2 ;;
+      --model) [[ $# -ge 2 ]] || die "--model requires a value"; model="$2"; shift 2 ;;
+      --timeout) [[ $# -ge 2 ]] || die "--timeout requires a value"; timeout="$2"; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *)
+        [[ -z "$id" ]] || die "unexpected argument: $1"
+        id="$1"
+        shift
+        ;;
+    esac
+  done
+  [[ -n "$id" ]] || die "job id required"
+
+  local dir
+  dir="$(job_dir "$id")"
+  [[ -d "$dir" ]] || die "unknown job id: $id"
+  local cur_repo job_repo
+  cur_repo="$(repo_top)"
+  job_repo="$(jq -r .repo "$dir/meta.json" 2>/dev/null || echo "")"
+  [[ "$job_repo" == "$cur_repo" ]] || die "job repository ($job_repo) does not match current repository ($cur_repo)"
+
+  local res state
+  res="$(job_result "$id")" || return 1
+  state="$(jq -r .state <<<"$res")"
+  [[ "$state" == finished ]] || die "job $id is not finished (state: $state)"
+
+  review_pick "$driver" "$model"
+
+  local n review_id created_at base tmp snapshot=""
+  n="$(review_next_n "$dir")"
+  review_id="$id-r$n"
+  created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  base="$(jq -r .base "$dir/meta.json")"
+
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/subcon-review.XXXXXX")" || die "cannot create a work area"
+  REVIEW_CHILD=""
+  # shellcheck disable=SC2064
+  trap 'trap - EXIT INT TERM HUP; [[ -z "${REVIEW_CHILD:-}" ]] || review_kill_tree "$REVIEW_CHILD"; rm -rf "'"$tmp"'"; exit 143' INT TERM HUP
+  # shellcheck disable=SC2064
+  trap 'rm -rf "'"$tmp"'"' EXIT
+
+  mkdir -p "$tmp/driver"
+  local error="" snapshot_err
+  if ! snapshot="$(review_snapshot "$cur_repo" "$base" "$tmp/clone" "$dir/patch.diff" 2>"$tmp/snapshot.err")"; then
+    snapshot_err="$(head -c 300 "$tmp/snapshot.err" | tr '\n' ' ')"
+    error="failed to prepare the review snapshot: $snapshot_err"
+  fi
+
+  local driver_rc=0
+  if [[ -z "$error" ]]; then
+    jq -cn --arg repo "$tmp/clone" '{repo: $repo}' > "$tmp/driver/meta.json"
+    review_job_prompt "$dir" "$tmp/driver/prompt.txt"
+    review_run_driver "$tmp/clone" "$tmp/driver" "$timeout" || driver_rc=$?
+  fi
+
+  local agy="$tmp/driver/agy.json" result="$tmp/driver/review.json"
+  if [[ -z "$error" ]]; then
+    if ! review_untouched "$tmp/clone" "$snapshot"; then
+      error="reviewer modified files"
+    elif [[ ! -s "$agy" ]] || ! jq -e . "$agy" >/dev/null 2>&1; then
+      error="driver produced no result (exit $driver_rc)"
+    elif [[ "$(jq -r '.status // empty' "$agy")" != SUCCESS || "$driver_rc" -ne 0 ]]; then
+      error="$(jq -r '.error // empty' "$agy")"
+      [[ -n "$error" ]] || error="driver failed (exit $driver_rc)"
+    elif ! jq -e '.structured_output | type == "object"' "$agy" >/dev/null 2>&1; then
+      error="driver returned no structured output"
+    else
+      jq -c .structured_output "$agy" > "$result"
+      error="$(review_validate "$result" 2>&1 >/dev/null)" || true
+      if [[ -n "$error" ]]; then
+        rm -f "$result"
+        error="${error#review: }"
+      fi
+    fi
+  fi
+
+  local meta_agy="null"
+  [[ -s "$agy" ]] && jq -e . "$agy" >/dev/null 2>&1 && meta_agy="$(cat "$agy")"
+  local meta
+  meta="$(jq -cn --argjson agy "$meta_agy" --arg id "$review_id" --arg job "$id" --arg repo "$cur_repo" \
+    --arg at "$created_at" --arg driver "$REVIEW_DRIVER" --arg model "$REVIEW_MODEL" --arg err "$error" '{
+      v: 1, id: $id, job_id: $job, target_type: "job", repo: $repo, created_at: $at, driver: $driver, model: $model,
+      duration_seconds: ($agy.duration_seconds? // null), cost_usd: ($agy.cost_usd? // null), usage: ($agy.usage? // null),
+      error: (if $err == "" then null else $err end)
+    }')"
+
+  [[ ! -f "$tmp/driver/agy.stream" ]] || cp "$tmp/driver/agy.stream" "$dir/review-$n.stream"
+
+  if [[ -n "$error" ]]; then
+    review_store "$dir" review- "$n" "$meta" ""
+    json_out '{id: $id, verdict: null, error: $e, path: null}' --arg id "$review_id" --arg e "$error"
+    return 4
+  fi
+
+  review_store "$dir" review- "$n" "$meta" "$result"
+  ( history_append_review "$dir/review-$n.meta.json" "$dir/review-$n.json" ) || echo "subcon: failed to record history for $review_id" >&2
+
+  local counts
+  counts="$(review_counts "$dir/review-$n.json")"
+  json_out '{id: $id, verdict: $v, s1: $c.s1, s2: $c.s2, s3: $c.s3, path: $p}' \
+    --arg id "$review_id" --arg v "$(jq -r .verdict "$dir/review-$n.json")" --argjson c "$counts" --arg p "$dir/review-$n.json"
+  [[ "$(jq -r .s1 <<<"$counts")" -eq 0 ]] || return 2
+  return 0
+}

@@ -12,6 +12,11 @@
 #   review          print a review result (verdict changes, one S2 finding); touches nothing
 #   review_approve  print an approving review with no findings
 #   review_write    like review, but first appends to README.md (a misbehaving reviewer)
+#   review_s1       print a rejecting review with one S1 finding
+#   review_bad      print an inconsistent review (approve with an S1 finding)
+#   review_sleep    wait FAKE_AGY_SLEEP seconds (default 3), then like review
+# FAKE_AGY_PROMPT_OUT, when set, receives the prompt. In every review mode FAKE_AGY_LOG also gets
+# "README=<README.md with newlines as |>" and "HEAD=<subject of the last commit>".
 # FAKE_AGY_LOG, when set, gets "PWD=<cwd>", "FLAGS=<args except the prompt>" and "SETTINGS=<the --settings value>".
 set -euo pipefail
 
@@ -39,6 +44,7 @@ if [[ -n "${FAKE_AGY_LOG:-}" ]]; then
   { echo "PWD=$PWD"; echo "FLAGS=${flags[*]:-}"; echo "SETTINGS=$settings"; } >> "$FAKE_AGY_LOG"
 fi
 [[ -n "$prompt" ]] || { echo "fake-agy: no prompt" >&2; exit 64; }
+[[ -z "${FAKE_AGY_PROMPT_OUT:-}" ]] || printf '%s\n' "$prompt" > "$FAKE_AGY_PROMPT_OUT"
 
 first_file="$(awk '/^## /{ f = ($0 ~ /^## Files/); next }
   f && /^[-*][[:space:]]/ { sub(/^[-*][[:space:]]+/, ""); gsub(/`/, ""); print; exit }' <<<"$prompt")"
@@ -69,6 +75,11 @@ report() {
 review_report() {
   local findings='[{"severity":"S2","file":"a.sh","line":3,"summary":"s","failure_scenario":"f","fix":"x"}]' verdict=changes
   if [[ "$1" == approve ]]; then findings='[]'; verdict=approve; fi
+  if [[ "$1" == s1 ]]; then findings='[{"severity":"S1","file":"a.sh","line":3,"summary":"s","failure_scenario":"f","fix":"x"}]'; verdict=reject; fi
+  if [[ "$1" == bad ]]; then findings='[{"severity":"S1","file":"a.sh","line":3,"summary":"s","failure_scenario":"f","fix":"x"}]'; verdict=approve; fi
+  if [[ -n "${FAKE_AGY_LOG:-}" ]]; then
+    { echo "README=$(tr '\n' '|' < README.md 2>/dev/null)"; echo "HEAD=$(git log -1 --format=%s 2>/dev/null)"; } >> "$FAKE_AGY_LOG"
+  fi
   emit "$(jq -cn --arg v "$verdict" --argjson f "$findings" '{status: "SUCCESS", conversation_id: "conv-fake-1", duration_seconds: 2.5,
     usage: {input_tokens: 100, output_tokens: 20, total_tokens: 120, cache_read_tokens: 30, thinking_tokens: 10},
     structured_output: {verdict: $v, summary: "fake review", findings: $f, unverified: ["nothing run"]}}')"
@@ -82,6 +93,9 @@ case "${FAKE_AGY_MODE:-ok}" in
   review) review_report changes ;;
   review_approve) review_report approve ;;
   review_write) echo "reviewer wrote this" >> README.md; review_report changes ;;
+  review_s1) review_report s1 ;;
+  review_bad) review_report bad ;;
+  review_sleep) sleep "${FAKE_AGY_SLEEP:-3}"; review_report changes ;;
   ok) change; report done ;;
   layout)
     if [[ -d .git ]]; then echo "git-layout: clone" >> "$first_file"; else echo "git-layout: worktree" >> "$first_file"; fi

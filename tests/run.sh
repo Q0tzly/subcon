@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv (all when none given).
+# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv reviewjob (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -3169,10 +3169,214 @@ test_reviewdrv_opencode_refused() {
   grep -q "review" "$T/err" || fail "stderr: $(cat "$T/err")"
 }
 
+# ---- subcon review <job-id> (ticket 60) ---------------------------------------
+
+# finished_job: ID of a finished job whose patch appends "fake change" to README.md.
+finished_job() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  [[ "$(result "$ID" .state)" == finished ]] || fail "job did not finish"
+}
+
+# rtmp: a TMPDIR of its own, so a test can see whether review left anything behind.
+rtmp() { export TMPDIR="$T/tmp"; mkdir -p "$TMPDIR"; }
+assert_no_leftovers() { assert_eq "$(find "$T/tmp" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" 0 leftovers; }
+
+test_reviewjob_ok() {
+  finished_job || return 1
+  rtmp
+  local d before
+  d="$(jobdir "$ID")"
+  before="$(cat "$d/agy.json" "$d/agy.stream" "$d/result.json" | cksum)"
+  export FAKE_AGY_LOG="$T/agy.log" FAKE_AGY_PROMPT_OUT="$T/prompt.out"
+  FAKE_AGY_MODE=review sub review "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .id)" "$ID-r1" id
+  assert_eq "$(jget .verdict)" changes verdict
+  assert_eq "$(jget '[.s1,.s2,.s3] | join(",")')" 0,1,0 counts
+  assert_eq "$(jget .path)" "$d/review-1.json" path
+  rv review_validate "$d/review-1.json" 2>"$T/err" || fail "stored review invalid: $(cat "$T/err")"
+  local m="$d/review-1.meta.json"
+  assert_eq "$(jq -r '[.v,.id,.job_id,.target_type,.driver,.model,.repo,(.error|tostring)] | join("|")' "$m")" \
+    "1|$ID-r1|$ID|job|agy|gemini-4-hydrogen-high|$TOP|null" meta
+  assert_eq "$(jq -r '.usage.total_tokens' "$m")" 120 meta.usage
+  assert_eq "$(jq -r '.duration_seconds' "$m")" 2.5 meta.duration
+  [[ -s "$d/review-1.stream" ]] || fail "review-1.stream missing"
+  assert_eq "$(cat "$d/agy.json" "$d/agy.stream" "$d/result.json" | cksum)" "$before" implementation-artifacts-untouched
+  local h
+  h="$(grep '"type":"review"' "$SUBCON_STATE/history.jsonl" | tail -n 1)"
+  assert_eq "$(jq -r '[.id,.job_id,.verdict,.s2] | join("|")' <<<"$h")" "$ID-r1|$ID|changes|1" history
+  # the reviewer ran in a clone with the patch applied and committed, not in the repository
+  [[ "$(sed -n 's/^PWD=//p' "$T/agy.log" | tail -n 1)" != "$TOP" ]] || fail "reviewer ran in the repository"
+  assert_match "$(sed -n 's/^README=//p' "$T/agy.log" | tail -n 1)" 'fake change' patched-readme
+  assert_eq "$(sed -n 's/^HEAD=//p' "$T/agy.log" | tail -n 1)" "subcon: review snapshot" snapshot-commit
+  # the prompt carries the instructions, the ticket, the checks, the report and the patch
+  local p="$T/prompt.out"
+  grep -q "Do not modify" "$p" || fail "prompt lacks the review instructions"
+  grep -q "## Files" "$p" || fail "prompt lacks the ticket"
+  grep -q "files_changed" "$p" || fail "prompt lacks the checks"
+  grep -q "design_questions" "$p" || fail "prompt lacks the report"
+  grep -q "^diff --git a/README.md" "$p" || fail "prompt lacks the patch"
+  assert_eq "$(git -C "$TOP" status --porcelain)" "" repo-untouched
+  assert_eq "$(git -C "$TOP" branch --list | wc -l | tr -d ' ')" 1 branches
+  assert_no_leftovers
+}
+
+test_reviewjob_s1_exits_2() {
+  finished_job || return 1
+  rtmp
+  FAKE_AGY_MODE=review_s1 sub review "$ID"
+  assert_rc 2 || return 1
+  assert_eq "$(jget '[.verdict,.s1] | join(",")')" reject,1 s1
+  [[ -s "$(jobdir "$ID")/review-1.json" ]] || fail "an S1 review must still be stored"
+  assert_no_leftovers
+}
+
+test_reviewjob_second_review_numbers() {
+  finished_job || return 1
+  rtmp
+  FAKE_AGY_MODE=review sub review "$ID"
+  assert_rc 0 || return 1
+  FAKE_AGY_MODE=review_approve sub review "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .id)" "$ID-r2" id2
+  assert_eq "$(jget .verdict)" approve verdict2
+  assert_eq "$(ls "$(jobdir "$ID")"/review-*.json | grep -vc meta)" 2 files
+  assert_eq "$(rv review_latest "$(jobdir "$ID")")" "$(jobdir "$ID")/review-2.json" latest
+}
+
+test_reviewjob_tamper_detected() {
+  finished_job || return 1
+  rtmp
+  FAKE_AGY_MODE=review_write sub review "$ID"
+  assert_rc 4 || return 1
+  assert_match "$(jget .error)" 'reviewer modified files' error
+  local d
+  d="$(jobdir "$ID")"
+  [[ ! -e "$d/review-1.json" ]] || fail "a tampered review must not be stored as a result"
+  assert_match "$(jq -r .error "$d/review-1.meta.json")" 'reviewer modified files' meta.error
+  ! grep -q '"type":"review"' "$SUBCON_STATE/history.jsonl" 2>/dev/null || fail "a failed review must not reach the history"
+  assert_eq "$(rv review_next_n "$d")" 2 number-advances
+  assert_eq "$(git -C "$TOP" status --porcelain)" "" repo-untouched
+  assert_no_leftovers
+}
+
+test_reviewjob_driver_failure() {
+  finished_job || return 1
+  rtmp
+  FAKE_AGY_MODE=fail sub review "$ID"
+  assert_rc 4 || return 1
+  [[ -n "$(jget '.error // empty')" ]] || fail "no error reported: $OUT"
+  [[ -s "$(jobdir "$ID")/review-1.meta.json" && ! -e "$(jobdir "$ID")/review-1.json" ]] || fail "failure record"
+  assert_no_leftovers
+}
+
+test_reviewjob_inconsistent_result() {
+  finished_job || return 1
+  rtmp
+  FAKE_AGY_MODE=review_bad sub review "$ID"
+  assert_rc 4 || return 1
+  assert_match "$(jget .error)" 'inconsistent verdict' error
+  [[ ! -e "$(jobdir "$ID")/review-1.json" ]] || fail "an inconsistent review was stored"
+}
+
+test_reviewjob_unknown_and_unfinished() {
+  sub review
+  assert_rc 1 || return 1
+  sub review nope
+  assert_rc 1 || return 1
+  grep -q "unknown job id" "$T/err" || fail "stderr: $(cat "$T/err")"
+  FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=5 submit_one docs/t/01-a.md || return 1
+  sub review "$ID"
+  assert_rc 1 || return 1
+  grep -q "not finished" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
+test_reviewjob_other_repo() {
+  finished_job || return 1
+  local other="$T/other"
+  git init -q "$other"
+  (cd "$other" && sub review "$ID")
+  OUT="$(cd "$other" && "$SUBCON" review "$ID" 2>"$T/err")" && RC=0 || RC=$?
+  assert_rc 1 || return 1
+  grep -q "does not match" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
+test_reviewjob_empty_patch() {
+  FAKE_AGY_MODE=partial submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  rtmp
+  FAKE_AGY_MODE=review sub review "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .verdict)" changes verdict
+  assert_no_leftovers
+}
+
+test_reviewjob_driver_and_model_selection() {
+  finished_job || return 1
+  rtmp
+  FAKE_AGY_MODE=review sub review --model gemini-4-hydrogen-medium "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r .model "$(jobdir "$ID")/review-1.meta.json")" gemini-4-hydrogen-medium flag
+  SUBCON_REVIEW_MODEL=gemini-4-hydrogen-low FAKE_AGY_MODE=review sub review "$ID"
+  assert_eq "$(jq -r .model "$(jobdir "$ID")/review-2.meta.json")" gemini-4-hydrogen-low env
+  # the implementation model and driver settings do not leak into the review
+  SUBCON_MODEL=gemini-3.8-flash-high SUBCON_DRIVER=claude FAKE_AGY_MODE=review sub review "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r '[.driver,.model] | join("|")' "$(jobdir "$ID")/review-3.meta.json")" "agy|gemini-4-hydrogen-high" defaults
+  # a claude reviewer defaults to the claude model, not the Gemini one
+  PATH="$(fake_claude_path):$PATH" FAKE_CLAUDE_MODE=review sub review --driver claude "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r '[.driver,.model] | join("|")' "$(jobdir "$ID")/review-4.meta.json")" "claude|claude-haiku-5-5" claude
+  PATH="$(fake_claude_path):$PATH" SUBCON_REVIEW_DRIVER=claude FAKE_CLAUDE_MODE=review sub review "$ID"
+  assert_eq "$(jq -r .driver "$(jobdir "$ID")/review-5.meta.json")" claude env-driver
+  assert_eq "$(jq -r .cost_usd "$(jobdir "$ID")/review-5.meta.json")" 0.02 cost
+  sub review --driver nope "$ID"
+  assert_rc 1 || return 1
+}
+
+test_reviewjob_bad_options() {
+  finished_job || return 1
+  sub review --bogus "$ID"
+  assert_rc 1 || return 1
+  sub review "$ID" "$ID"
+  assert_rc 1 || return 1
+  sub review --timeout
+  assert_rc 1 || return 1
+}
+
+test_reviewjob_cleanup_on_term() {
+  finished_job || return 1
+  rtmp
+  ( FAKE_AGY_MODE=review_sleep FAKE_AGY_SLEEP=20 "$SUBCON" review "$ID" >"$T/out" 2>"$T/err" ) &
+  local bg=$! i
+  for ((i = 0; i < 100; i++)); do
+    [[ "$(find "$T/tmp" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -gt 0 ]] && break
+    sleep 0.1
+  done
+  [[ "$(find "$T/tmp" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -gt 0 ]] || { killtree "$bg"; fail "review never created its work area"; }
+  sleep 0.5
+  local pids
+  pids="$(pstree_of "$bg")"
+  kill -TERM "$bg" 2>/dev/null
+  for ((i = 0; i < 100; i++)); do
+    kill -0 "$bg" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$bg" 2>/dev/null && { killtree "$bg"; fail "review did not stop on TERM"; }
+  sleep 0.3
+  assert_no_leftovers
+  local p
+  for p in $pids; do
+    kill -0 "$p" 2>/dev/null && { kill -9 $pids 2>/dev/null; fail "process $p survived"; }
+  done
+  return 0
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv reviewjob)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
