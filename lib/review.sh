@@ -125,14 +125,14 @@ review_pick() {
 # apply <patch> when it is not empty, and commit the result. Prints the snapshot commit.
 review_snapshot() {
   local repo="$1" rev="$2" dest="$3" patch="${4:-}"
-  git clone -q --local --no-checkout "$repo" "$dest" 2>&1 || return 1
-  git -C "$dest" checkout -q --detach "$rev" 2>&1 || return 1
+  git clone -q --local --no-checkout "$repo" "$dest" >&2 || return 1
+  git -C "$dest" checkout -q --detach "$rev" >&2 || return 1
   if [[ -n "$patch" && -s "$patch" ]]; then
-    git -C "$dest" apply --binary "$patch" 2>&1 || return 1
+    git -C "$dest" apply --binary "$patch" >&2 || return 1
   fi
-  git -C "$dest" add -A 2>&1 || return 1
+  git -C "$dest" add -A >&2 || return 1
   git -C "$dest" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=subcon -c user.email=subcon@localhost \
-    commit -q --allow-empty --no-verify -m "$REVIEW_SNAPSHOT_MESSAGE" 2>&1 || return 1
+    commit -q --allow-empty --no-verify -m "$REVIEW_SNAPSHOT_MESSAGE" >&2 || return 1
   git -C "$dest" rev-parse HEAD
 }
 
@@ -150,7 +150,7 @@ review_job_prompt() {
     cat "$SUBCON_REVIEW_PROMPT"
     printf '\n\n--- REVIEW TARGET: a change made for one ticket ---\n\n'
     printf 'The change is already applied and committed as the last commit of the current directory\n'
-    printf '(the commit before it is the base). git is not available: read files with cat, rg and sed,\n'
+    printf '(the commit before it is the base). git is not available: read files with cat, grep, head, tail and ls,\n'
     printf 'and use the patch below to see what changed.\n\n'
     printf '## Ticket\n\n'
     cat "$dir/ticket.md"
@@ -191,12 +191,22 @@ review_store() {
   printf '%s\n' "$meta" | atomic_write "$store/$base.meta.json"
 }
 
+# review_reap <pid>: wait up to 3 seconds for the child to exit, then kill it.
+review_reap() {
+  local pid="$1" i
+  for ((i = 0; i < 30; i++)); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
 # review_workarea: create a work area in REVIEW_TMP and remove it (and stop a running driver) on exit or TERM.
 review_workarea() {
   REVIEW_TMP="$(mktemp -d "${TMPDIR:-/tmp}/subcon-review.XXXXXX")" || die "cannot create a work area"
   REVIEW_CHILD=""
   # shellcheck disable=SC2064
-  trap 'trap - EXIT INT TERM HUP; [[ -z "${REVIEW_CHILD:-}" ]] || review_kill_tree "$REVIEW_CHILD"; rm -rf "'"$REVIEW_TMP"'"; exit 143' INT TERM HUP
+  trap 'trap - EXIT INT TERM HUP; if [[ -n "${REVIEW_CHILD:-}" ]]; then review_kill_tree "$REVIEW_CHILD"; review_reap "$REVIEW_CHILD"; fi; rm -rf "'"$REVIEW_TMP"'"; exit 143' INT TERM HUP
   # shellcheck disable=SC2064
   trap 'rm -rf "'"$REVIEW_TMP"'"' EXIT
   mkdir -p "$REVIEW_TMP/driver"
@@ -305,7 +315,7 @@ review_target_prompt() {
     cat "$SUBCON_REVIEW_PROMPT"
     printf '\n\n--- REVIEW TARGET: files of the current directory ---\n\n'
     printf 'The current directory is a snapshot of the HEAD commit of the repository, with no uncommitted changes.\n'
-    printf 'git is not available: read the files with cat, rg and sed.\n\n'
+    printf 'git is not available: read the files with cat, grep, head, tail and ls.\n\n'
     printf '## Targets\n\n'
     for t in "$@"; do printf -- '- %s\n' "$t"; done
     printf '\n## Brief\n\n'
@@ -322,16 +332,17 @@ review_target_prompt() {
 review_target_run() {
   local driver="$1" model="$2" timeout="$3" brief="$4"
   shift 4
-  review_pick "$driver" "$model"
+  local repo
+  repo="$(repo_top)"
 
   local t bad=0
   for t in "$@"; do
     review_target_check "$t" || bad=1
   done
   [[ "$bad" -eq 0 ]] || return 1
+  review_pick "$driver" "$model"
 
-  local repo head_sha review_id store targets_json extra snapshot="" rc=0
-  repo="$(repo_top)"
+  local head_sha review_id store targets_json extra snapshot="" rc=0
   head_sha="$(git rev-parse HEAD)"
   review_id="$(review_new_id)"
   store="$(state_root)/reviews/$review_id"
@@ -406,6 +417,10 @@ cmd_review() {
 
   local n snapshot="" rc=0
   n="$(review_next_n "$dir")"
+  # Reserve the number with a placeholder meta (noclobber), so concurrent reviews of one job cannot share it.
+  while ! ( set -o noclobber; printf '%s\n' '{"v":1,"error":"review in progress or interrupted"}' > "$dir/review-$n.meta.json" ) 2>/dev/null; do
+    n=$((n + 1))
+  done
   review_workarea
   if ! snapshot="$(review_snapshot "$cur_repo" "$(jq -r .base "$dir/meta.json")" "$REVIEW_TMP/clone" "$dir/patch.diff" 2>"$REVIEW_TMP/snapshot.err")"; then
     local err

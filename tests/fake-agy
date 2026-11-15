@@ -2,6 +2,7 @@
 # Stand-in for agy in tests (linked as `agy` on PATH). Behaviour comes from FAKE_AGY_MODE:
 #   ok       append "fake change" to the ticket's first ## Files entry, report done
 #   outside  like ok, plus create outside.txt
+#   whitespace  like ok, but the added line has trailing spaces (git apply warns about it)
 #   commit   like ok, then commit
 #   partial  change nothing, report partial
 #   fail     exit 3 without output
@@ -102,6 +103,7 @@ case "${FAKE_AGY_MODE:-ok}" in
     if git status --porcelain >/dev/null 2>&1; then echo "git-works: yes" >> "$first_file"; else echo "git-works: no" >> "$first_file"; fi
     report done ;;
   outside) change; echo x > outside.txt; report done ;;
+  whitespace) change; echo "trailing   " >> "$first_file"; report done ;;
   commit)
     change
     git add -A

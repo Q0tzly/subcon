@@ -3092,8 +3092,12 @@ test_reviewdrv_agy_settings_read_only() {
   assert_eq "$(jq -r '.permissions.allow | index("command(*)")' <<<"$st")" null no-command-star
   assert_eq "$(jq -r --arg r "read_file($RW)" '.permissions.allow | index($r) != null' <<<"$st")" true read_file-clone
   local c
-  for c in cat rg ls sed head tail grep wc fd; do
+  for c in cat ls head tail grep wc; do
     assert_eq "$(jq -r --arg c "command($c)" '.permissions.allow | index($c) != null' <<<"$st")" true "allow $c"
+  done
+  # these take flags that run or write (sed -E -i, rg --pre, fd -x), and rules match word prefixes
+  for c in sed rg fd; do
+    assert_eq "$(jq -r --arg c "command($c)" '.permissions.allow | index($c)' <<<"$st")" null "$c not allowed"
   done
   for c in git gh sudo rm; do
     assert_eq "$(jq -r --arg c "command($c)" '.permissions.deny | index($c) != null' <<<"$st")" true "deny $c"
@@ -3147,7 +3151,9 @@ test_reviewdrv_claude_ok() {
   grep -qx -- '--allowedTools Read,Grep,Glob' "$T/claude.log" || fail "log: $(cat "$T/claude.log")"
   grep -qx -- '--model claude-haiku-5-5' "$T/claude.log" || fail "log: $(cat "$T/claude.log")"
   grep -qx -- '--json-schema' "$T/claude.log" || fail "no --json-schema: $(cat "$T/claude.log")"
-  ! grep -Eq 'acceptEdits|Edit|Write|Bash' "$T/claude.log" || fail "write tools present: $(cat "$T/claude.log")"
+  grep -qx -- '--disallowedTools Edit,Write,Bash,NotebookEdit,WebFetch,WebSearch' "$T/claude.log" || fail "no explicit tool denies: $(cat "$T/claude.log")"
+  ! grep -Eq 'acceptEdits' "$T/claude.log" || fail "review ran in acceptEdits: $(cat "$T/claude.log")"
+  ! grep -E '^--allowedTools' "$T/claude.log" | grep -Eq 'Edit|Write|Bash' || fail "write tools allowed: $(cat "$T/claude.log")"
   assert_eq "$(git -C "$T/rw" status --porcelain)" "" clone-untouched
 }
 
@@ -3278,6 +3284,29 @@ test_reviewjob_inconsistent_result() {
   assert_rc 4 || return 1
   assert_match "$(jget .error)" 'inconsistent verdict' error
   [[ ! -e "$(jobdir "$ID")/review-1.json" ]] || fail "an inconsistent review was stored"
+}
+
+test_reviewjob_patch_with_whitespace_warning() {
+  FAKE_AGY_MODE=whitespace submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  rtmp
+  FAKE_AGY_MODE=review sub review "$ID"
+  assert_rc 0 || return 1
+  assert_eq "$(jget .verdict)" changes verdict
+}
+
+test_reviewjob_concurrent_reviews_get_distinct_numbers() {
+  finished_job || return 1
+  rtmp
+  local d
+  d="$(jobdir "$ID")"
+  ( FAKE_AGY_MODE=review_sleep FAKE_AGY_SLEEP=2 "$SUBCON" review "$ID" >"$T/o1" 2>"$T/e1" ) &
+  local p1=$!
+  ( FAKE_AGY_MODE=review_sleep FAKE_AGY_SLEEP=2 "$SUBCON" review "$ID" >"$T/o2" 2>"$T/e2" ) &
+  local p2=$!
+  wait "$p1"; wait "$p2"
+  assert_eq "$(ls "$d"/review-*.json | grep -vc meta)" 2 results
+  assert_eq "$(cat "$T/o1" "$T/o2" | jq -r .id | sort | tr '\n' ' ')" "$ID-r1 $ID-r2 " ids
 }
 
 test_reviewjob_unknown_and_unfinished() {
@@ -3460,6 +3489,7 @@ test_reviewtarget_invalid_targets() {
     assert_rc 1 || return 1
     [[ -n "$(head -c 1 "$T/err")" ]] || fail "no message for target: $bad"
   done
+  ! grep -q "Google login" "$T/err" || fail "an invalid target reached the driver: $(cat "$T/err")"
   [[ ! -d "$SUBCON_STATE/reviews" ]] || fail "an invalid target left a review directory"
   [[ ! -d "$SUBCON_STATE/jobs" || "$(jobcount)" == 0 ]] || fail "jobs created"
   assert_no_leftovers

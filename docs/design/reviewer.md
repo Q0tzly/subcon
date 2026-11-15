@@ -61,15 +61,19 @@ subcon reviews [<job-id>]
 
 ドライバ側（`SUBCON_ROLE=review` のとき。複製の外・親リポジトリへの書き込みは、そもそもツールを与えないことで防ぐ）:
 
-- **agy**: `allow` から `command(*)` を外す。許可は `read_file(<複製>)` と読み取り専用のコマンド
-  （`cat` `rg` `ls` `sed` `head` `tail` `grep` `wc` `fd`）に限り、`git` `gh` `sudo` `rm` は deny。
+- **agy**: `allow` から `command(*)` を外す。許可は `read_file(<複製>)` と、フラグで実行・書き込みができない
+  コマンド（`cat` `ls` `head` `tail` `grep` `wc`）に限り、`git` `gh` `sudo` `rm` は deny。規則は語の前方一致なので、
+  `sed`（`-i` `w`）・`rg`（`--pre`）・`fd`（`-x`）は許可しない（Hydrogen のレビューで指摘、2026-11-15）。
   編集ツール（`write_file` `edit_file` `write_to_file` `replace_file_content` `multi_replace_file_content`）は deny に入れる。
   実機の確認（2026-11-15）: accept-edits を外しただけでは `write_file` が通ってファイルが作られた。
   deny に入れると `write_file` は拒否され、`git commit` と `rm` も拒否された。ツール名の網羅は保証できないので、
-  複製の事後検査（上の手順 4）が最後の砦になる。
-  実機の確認（2026-11-15）: `--disable-slash-commands` を付けると `--mode plan` は効かない（警告が出る）ので、
-  `plan` には頼らない。上の許可リストだけで設計 doc のレビューが完走し、親リポジトリは変わらなかった。
-- **claude**: `--permission-mode dontAsk --allowedTools "Read,Grep,Glob"`（Edit・Write・Bash を与えない）。
+  複製の事後検査（上の手順 4）が最後の砦になる。`cat x > y` のようなリダイレクトは複製の中なら事後検査が、
+  外なら agy の `--sandbox` が止める前提（未検証）。
+  実機の確認（2026-11-15）: `--disable-slash-commands` を付けると`--mode plan` は効かない（警告が出る）ので、
+  `plan` には頼らない。
+- **claude**: `--permission-mode dontAsk --allowedTools "Read,Grep,Glob"` に加え、
+  `--disallowedTools "Edit,Write,Bash,NotebookEdit,WebFetch,WebSearch"`（`dontAsk` は確認が要るものを拒否するだけで、
+  利用者の設定の allow 規則が有効なら通りうるため）。
   `SUBCON_CLAUDE_MCP_CONFIG` と `SUBCON_CONVERSATION` は review では無視し、MCP は空に固定する。
   実機の確認（2026-11-15、claude-haiku-5-5）: `--json-schema` と併用して完走し、`structured_output` が返った。
   Write と Bash の試行は `permission_denials` に記録されて拒否され、ファイルは作られなかった。
@@ -126,7 +130,8 @@ subcon reviews [<job-id>]
 
 - ジョブ対象: `${SUBCON_STATE}/jobs/<id>/review-<n>.json`（結果）、`review-<n>.meta.json`
   （`v` `id` `job_id` `driver` `model` `created_at` `duration_seconds` `cost_usd` `usage` `error`）、
-  `review-<n>.stream`。`n` は既存の `review-*.meta.json` の数値最大 + 1。失敗したレビューも
+  `review-<n>.stream`。`n` は既存の `review-*.meta.json` の数値最大 + 1 で、並行する review が同じ番号を取らないよう
+  プレースホルダの meta を noclobber で先に作って確保する（解放されなかった番号は「中断」として残る）。失敗したレビューも
   `meta.json` に `error` を残し、`review-<n>.json` は作らない（`n` は進める）。最新 = `review-<n>.json` が
   ある最大の `n`（文字列の並びではなく数値で比べる）。
 - `--target`: `${SUBCON_STATE}/reviews/<review-id>/` に同じ名前（`review.json` `review.meta.json`
@@ -177,6 +182,9 @@ agy の消費者ログインを使う場合の警告は、実装役と同じく 
 上位がテスト（fake の拡張と受け入れ条件）を先に書いてコミットしてから実装する。
 
 ## 決まっていないこと
+
+- claude ドライバのタイムアウトは `timeout` / `gtimeout` が無い環境（素の macOS）では効かない（実装役でも同じ）。
+  review では止まらないレビューが残りうる。coreutils を要求するか、シェルで見張るかは未決。
 
 - 未コミットの作業ツリーを `--target` で読ませる方法（v1 は `HEAD` のみ）。
 - container / ci ランナーで `review` 自体を動かすこと（v1 は常にローカル）。

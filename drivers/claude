@@ -105,13 +105,17 @@ fi
 prompt="$(cat "$SUBCON_PROMPT_FILE")"
 raw_out="$(mktemp)"
 trap 'rm -f "$raw_out"' EXIT
+trap 'exit 143' INT TERM HUP
 
 # A review gets read-only tools and denies everything else (dontAsk) instead of prompting.
 permission_mode=acceptEdits
 allowed_tools="Read,Edit,Write,Bash,Grep,Glob"
+disallowed_args=()
 if [[ "$role" == review ]]; then
   permission_mode=dontAsk
   allowed_tools="Read,Grep,Glob"
+  # dontAsk only refuses what would prompt; allow rules in the user's settings could still enable these.
+  disallowed_args=(--disallowedTools "Edit,Write,Bash,NotebookEdit,WebFetch,WebSearch")
 fi
 
 claude_rc=0
@@ -123,6 +127,7 @@ ${timeout_cmd[@]+"${timeout_cmd[@]}"} claude -p "$prompt" \
   --output-format json \
   --permission-mode "$permission_mode" \
   --allowedTools "$allowed_tools" \
+  ${disallowed_args[@]+"${disallowed_args[@]}"} \
   --json-schema "$(cat "$SUBCON_SCHEMA")" \
   "${session_args[@]}" \
   ${mcp_args[@]+"${mcp_args[@]}"} \

@@ -53,13 +53,13 @@ fi
 if [[ "$role" == review ]]; then
   # A reviewer reads the throwaway clone it runs in and nothing else: no command(*), no edit tools,
   # no accept-edits mode (unlisted tools are auto-denied in headless mode). The caller checks that
-  # the clone is unchanged afterwards. sed -i is denied because sed is allowed for reading.
+  # the clone is unchanged afterwards. Rules match word prefixes, so only commands without flags that
+  # run or write are allowed: not sed (-i, w), rg (--pre) or fd (-x).
   clone="$(pwd)"
   clone_real="$(pwd -P)"
   settings="$(jq -cn --arg a "read_file($clone)" --arg b "read_file($clone_real)" '{permissions: {
-    allow: (([$a, $b] | unique) + ["command(cat)","command(rg)","command(ls)","command(sed)","command(head)",
-      "command(tail)","command(grep)","command(wc)","command(fd)"]),
-    deny: ["command(git)","command(gh)","command(sudo)","command(rm)","command(sed -i)","command(sed --in-place)",
+    allow: (([$a, $b] | unique) + ["command(cat)","command(ls)","command(head)","command(tail)","command(grep)","command(wc)"]),
+    deny: ["command(git)","command(gh)","command(sudo)","command(rm)",
       "write_file(*)","edit_file(*)","write_to_file(*)","replace_file_content(*)","multi_replace_file_content(*)"]
   }}')"
 else
