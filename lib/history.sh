@@ -164,3 +164,50 @@ history_append_event() {
 
   _history_append "$line"
 }
+
+# history_append_review <meta-file> <review-file>: one "review" line in history.jsonl. The review must be validated.
+history_append_review() {
+  local meta_file="${1:?meta file required}"
+  local review_file="${2:?review file required}"
+  [[ -f "$meta_file" ]] || { echo "subcon: meta file missing: $meta_file" >&2; return 1; }
+
+  review_validate "$review_file" || return 1
+  local counts
+  counts="$(review_counts "$review_file")" || return 1
+
+  local line
+  line="$(jq -cn \
+    --argjson m "$(< "$meta_file")" \
+    --argjson r "$(< "$review_file")" \
+    --argjson c "$counts" \
+    '{
+      v: 1,
+      type: "review",
+      id: $m.id,
+      target_type: $m.target_type,
+      job_id: ($m.job_id // null),
+      repo: $m.repo,
+      created_at: $m.created_at,
+      driver: $m.driver,
+      model: $m.model,
+      verdict: $r.verdict,
+      s1: $c.s1,
+      s2: $c.s2,
+      s3: $c.s3,
+      duration_s: ($m.duration_seconds // null),
+      cost_usd: ($m.cost_usd // null),
+      tokens: (
+        if $m.usage == null then null
+        else {
+          input: $m.usage.input_tokens,
+          output: $m.usage.output_tokens,
+          total: $m.usage.total_tokens,
+          cache_read: $m.usage.cache_read_tokens,
+          thinking: $m.usage.thinking_tokens
+        }
+        end
+      )
+    }')" || return 1
+
+  _history_append "$line"
+}

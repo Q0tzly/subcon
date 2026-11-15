@@ -7,7 +7,7 @@ while [[ -L "$SELF" ]]; do SELF="$(readlink "$SELF")"; done
 SUBCON_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 export SUBCON_ROOT
 
-for f in common ticket job query manage history stats export; do
+for f in common ticket job query manage history stats export review; do
   # shellcheck source=/dev/null
   source "$SUBCON_ROOT/lib/$f.sh"
 done

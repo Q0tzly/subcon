@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "changes", "reject"]
+    },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["S1", "S2", "S3"]
+          },
+          "file": { "type": "string" },
+          "line": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "1-based line; 0 when the line cannot be identified"
+          },
+          "summary": { "type": "string" },
+          "failure_scenario": { "type": "string" },
+          "fix": { "type": "string" }
+        },
+        "required": ["severity", "file", "line", "summary", "failure_scenario", "fix"],
+        "additionalProperties": false
+      }
+    },
+    "unverified": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Things that could not be read or checked; empty only when everything was checked"
+    }
+  },
+  "required": ["verdict", "summary", "findings", "unverified"],
+  "additionalProperties": false
+}
