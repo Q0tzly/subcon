@@ -63,6 +63,10 @@ subcon reviews [<job-id>]
 
 - **agy**: `allow` から `command(*)` を外す。許可は `read_file(<複製>)` と読み取り専用のコマンド
   （`cat` `rg` `ls` `sed` `head` `tail` `grep` `wc` `fd`）に限り、`git` `gh` `sudo` `rm` は deny。
+  編集ツール（`write_file` `edit_file` `write_to_file` `replace_file_content` `multi_replace_file_content`）は deny に入れる。
+  実機の確認（2026-11-15）: accept-edits を外しただけでは `write_file` が通ってファイルが作られた。
+  deny に入れると `write_file` は拒否され、`git commit` と `rm` も拒否された。ツール名の網羅は保証できないので、
+  複製の事後検査（上の手順 4）が最後の砦になる。
   実機の確認（2026-11-15）: `--disable-slash-commands` を付けると `--mode plan` は効かない（警告が出る）ので、
   `plan` には頼らない。上の許可リストだけで設計 doc のレビューが完走し、親リポジトリは変わらなかった。
 - **claude**: `--permission-mode dontAsk --allowedTools "Read,Grep,Glob"`（Edit・Write・Bash を与えない）。

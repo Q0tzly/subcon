@@ -5,6 +5,10 @@
 #          success envelope with a structured_output report, exit 0
 #   error  change the file, print an is_error envelope, exit 1
 #   nojson print non-JSON garbage, exit 1
+#   review          print a success envelope whose structured_output is a review (verdict changes, one S2), touch nothing
+#   review_approve  like review with no findings
+#   review_write    like review, but first appends to README.md (a misbehaving reviewer)
+# FAKE_CLAUDE_LOG, when set, gets one line per flag ("--flag value"; the schema and prompt are not logged).
 # `claude auth status` always reports a signed-in user.
 set -euo pipefail
 
@@ -14,6 +18,16 @@ if [[ "${1:-}" == "auth" ]]; then
 fi
 
 session="" resume="" prompt="" mcp_seen=0
+flaglog() { [[ -z "${FAKE_CLAUDE_LOG:-}" ]] || echo "$*" >> "$FAKE_CLAUDE_LOG"; }
+# Log "--flag value" for every flag that takes a value, but never the schema or the prompt.
+log_args=("$@")
+for ((i = 0; i < ${#log_args[@]}; i++)); do
+  case "${log_args[i]}" in
+    --json-schema) flaglog "${log_args[i]}" ;;
+    --session-id|--resume|--mcp-config|--model|--output-format|--permission-mode|--allowedTools|--disallowedTools) flaglog "${log_args[i]}" "${log_args[i + 1]:-}" ;;
+    -p|--print|--strict-mcp-config) flaglog "${log_args[i]}" ;;
+  esac
+done
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --session-id) session="$2"; shift 2 ;;
@@ -36,6 +50,13 @@ done
 [[ -n "$session" ]] || session="fake-session-1"
 
 mode="${FAKE_CLAUDE_MODE:-ok}"
+if [[ "$mode" == review* ]]; then
+  [[ "$mode" != review_write ]] || echo "reviewer wrote this" >> README.md
+  findings='[{"severity":"S2","file":"a.sh","line":3,"summary":"s","failure_scenario":"f","fix":"x"}]' verdict=changes
+  if [[ "$mode" == review_approve ]]; then findings='[]'; verdict=approve; fi
+  jq -cn --arg s "$session" --arg v "$verdict" --argjson f "$findings" '{type: "result", subtype: "success", is_error: false, result: "done", session_id: $s, duration_ms: 2500, total_cost_usd: 0.02, usage: {input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 30, cache_creation_input_tokens: 0}, structured_output: {verdict: $v, summary: "fake review", findings: $f, unverified: ["nothing run"]}}'
+  exit 0
+fi
 if [[ "$mode" == "nojson" ]]; then
   echo "this is not json"
   exit 1

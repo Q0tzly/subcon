@@ -20,6 +20,13 @@ case "${1:-}" in
   default-model) echo gemini-4-hydrogen-medium; exit 0 ;;
 esac
 
+# implement (default): edit the working directory. review: read only (see docs/design/reviewer.md).
+role="${SUBCON_ROLE:-implement}"
+case "$role" in
+  implement|review) ;;
+  *) echo "drivers/agy: unknown role: $role" >&2; exit 1 ;;
+esac
+
 job_dir="${1:?job directory required}"
 [[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
 while [[ "$job_dir" != "/" && "$job_dir" == */ ]]; do job_dir="${job_dir%/}"; done
@@ -43,32 +50,48 @@ if [[ -f "$job_dir/meta.json" ]]; then
   fi
 fi
 
-# Headless agy auto-denies anything not allowed, which aborts the whole run,
-# so allow every command and deny the ones that change git state or reach out.
-# Rules match whole words as a prefix: command(git commit) covers "git commit -m x".
-# agy has no CLI setting to forbid BypassSandbox, and command(*) also approves
-# unsandboxed runs; the deny list applies to those too.
-#
-# Also allow read_file for the job directory and the repo's parent directory
-# (or the repo itself if the parent is $HOME or /) so jobs can read outside
-# repositories or artifacts without being auto-denied.
-settings="$(jq -cn \
-  --arg job_rule "read_file($job_dir)" \
-  --arg repo_rule "${repo_scope:+read_file($repo_scope)}" \
-  '{permissions: {
-    allow: (["command(*)"] + (if $repo_rule != "" then [$repo_rule] else [] end) + [$job_rule]),
-    deny: [
-      "command(git commit)","command(git add)","command(git reset)","command(git checkout)",
-      "command(git switch)","command(git restore)","command(git stash)","command(git rebase)",
-      "command(git merge)","command(git push)","command(git clean)","command(git branch)",
-      "command(git tag)","command(git rm)","command(git mv)","command(gh)","command(sudo)",
-      "command(rm -rf)","command(rm -fr)"
-    ]
+if [[ "$role" == review ]]; then
+  # A reviewer reads the throwaway clone it runs in and nothing else: no command(*), no edit tools,
+  # no accept-edits mode (unlisted tools are auto-denied in headless mode). The caller checks that
+  # the clone is unchanged afterwards. sed -i is denied because sed is allowed for reading.
+  clone="$(pwd)"
+  clone_real="$(pwd -P)"
+  settings="$(jq -cn --arg a "read_file($clone)" --arg b "read_file($clone_real)" '{permissions: {
+    allow: (([$a, $b] | unique) + ["command(cat)","command(rg)","command(ls)","command(sed)","command(head)",
+      "command(tail)","command(grep)","command(wc)","command(fd)"]),
+    deny: ["command(git)","command(gh)","command(sudo)","command(rm)","command(sed -i)","command(sed --in-place)",
+      "write_file(*)","edit_file(*)","write_to_file(*)","replace_file_content(*)","multi_replace_file_content(*)"]
   }}')"
+else
+  # Headless agy auto-denies anything not allowed, which aborts the whole run,
+  # so allow every command and deny the ones that change git state or reach out.
+  # Rules match whole words as a prefix: command(git commit) covers "git commit -m x".
+  # agy has no CLI setting to forbid BypassSandbox, and command(*) also approves
+  # unsandboxed runs; the deny list applies to those too.
+  #
+  # Also allow read_file for the job directory and the repo's parent directory
+  # (or the repo itself if the parent is $HOME or /) so jobs can read outside
+  # repositories or artifacts without being auto-denied.
+  settings="$(jq -cn \
+    --arg job_rule "read_file($job_dir)" \
+    --arg repo_rule "${repo_scope:+read_file($repo_scope)}" \
+    '{permissions: {
+      allow: (["command(*)"] + (if $repo_rule != "" then [$repo_rule] else [] end) + [$job_rule]),
+      deny: [
+        "command(git commit)","command(git add)","command(git reset)","command(git checkout)",
+        "command(git switch)","command(git restore)","command(git stash)","command(git rebase)",
+        "command(git merge)","command(git push)","command(git clean)","command(git branch)",
+        "command(git tag)","command(git rm)","command(git mv)","command(gh)","command(sudo)",
+        "command(rm -rf)","command(rm -fr)"
+      ]
+    }}')"
+fi
 
 # Set for a resumed job: continue that agy conversation instead of starting a new one.
 resume_flags=()
-[[ -z "${SUBCON_CONVERSATION:-}" ]] || resume_flags=(--conversation "$SUBCON_CONVERSATION")
+[[ "$role" == review || -z "${SUBCON_CONVERSATION:-}" ]] || resume_flags=(--conversation "$SUBCON_CONVERSATION")
+mode_flags=(--mode accept-edits)
+[[ "$role" != review ]] || mode_flags=()
 
 # stream-json emits the conversation_id in its first event, so a run that is killed
 # before agy writes its final result can still be resumed.
@@ -77,7 +100,7 @@ rc=0
 agy -p "$(cat "$SUBCON_PROMPT_FILE")" \
   ${resume_flags[@]+"${resume_flags[@]}"} \
   --model "$SUBCON_JOB_MODEL" \
-  --mode accept-edits \
+  ${mode_flags[@]+"${mode_flags[@]}"} \
   --sandbox \
   --settings "$settings" \
   --output-format stream-json \

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review (all when none given).
+# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -3038,10 +3038,141 @@ test_review_history_target_and_stats() {
   jq -e . <<<"$OUT" >/dev/null || fail "stats output is not JSON after a review line"
 }
 
+# ---- review role of the drivers (ticket 59) -----------------------------------
+
+# review_setup: $T/rj is the directory handed to the driver (with a meta.json naming the repo),
+# $T/rw the throwaway clone it runs in, $T/rj/prompt.txt the prompt.
+review_setup() {
+  mkdir -p "$T/rj"
+  git clone -q "$TOP" "$T/rw"
+  printf '{"repo":"%s"}\n' "$TOP" > "$T/rj/meta.json"
+  echo "review this" > "$T/rj/prompt.txt"
+  RW="$(cd "$T/rw" && pwd)"
+}
+
+# run_review_driver <driver> [<model>]: the driver in review role, as a runner would call it.
+run_review_driver() {
+  (
+    cd "$T/rw"
+    export SUBCON_ROLE=review SUBCON_PROMPT_FILE="$T/rj/prompt.txt" SUBCON_JOB_MODEL="${2:-m}" \
+      SUBCON_SCHEMA="$ROOT/schema/review.schema.json" SUBCON_TIMEOUT=60s
+    "$ROOT/drivers/$1" "$T/rj"
+  ) >"$T/out" 2>"$T/err" && RC=0 || RC=$?
+}
+
+# agy_settings: the --settings JSON the fake agy logged.
+agy_settings() { sed -n 's/^SETTINGS=//p' "$T/agy.log" | tail -n 1; }
+
+test_reviewdrv_agy_ok() {
+  review_setup
+  export FAKE_AGY_LOG="$T/agy.log" FAKE_AGY_MODE=review
+  run_review_driver agy gemini-4-hydrogen-high
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r .structured_output.verdict "$T/rj/agy.json")" changes verdict
+  assert_eq "$(jq -r .status "$T/rj/agy.json")" SUCCESS status
+  [[ -s "$T/rj/agy.stream" ]] || fail "agy.stream not written in the given directory"
+  local flags
+  flags="$(sed -n 's/^FLAGS=//p' "$T/agy.log" | tail -n 1)"
+  [[ " $flags " == *" --model gemini-4-hydrogen-high "* ]] || fail "model flag: $flags"
+  [[ " $flags " == *" --sandbox "* ]] || fail "no --sandbox: $flags"
+  [[ " $flags " == *" --json-schema "* ]] || fail "no --json-schema: $flags"
+  [[ "$flags" != *accept-edits* ]] || fail "review must not run in accept-edits mode: $flags"
+  assert_eq "$(sed -n 's/^PWD=//p' "$T/agy.log" | tail -n 1)" "$RW" pwd
+  assert_eq "$(git -C "$T/rw" status --porcelain)" "" clone-untouched
+}
+
+test_reviewdrv_agy_settings_read_only() {
+  review_setup
+  export FAKE_AGY_LOG="$T/agy.log" FAKE_AGY_MODE=review
+  run_review_driver agy
+  assert_rc 0 || return 1
+  local st
+  st="$(agy_settings)"
+  jq -e . <<<"$st" >/dev/null || fail "settings is not JSON: $st"
+  assert_eq "$(jq -r '.permissions.allow | index("command(*)")' <<<"$st")" null no-command-star
+  assert_eq "$(jq -r --arg r "read_file($RW)" '.permissions.allow | index($r) != null' <<<"$st")" true read_file-clone
+  local c
+  for c in cat rg ls sed head tail grep wc fd; do
+    assert_eq "$(jq -r --arg c "command($c)" '.permissions.allow | index($c) != null' <<<"$st")" true "allow $c"
+  done
+  for c in git gh sudo rm; do
+    assert_eq "$(jq -r --arg c "command($c)" '.permissions.deny | index($c) != null' <<<"$st")" true "deny $c"
+  done
+  for c in write_file edit_file write_to_file replace_file_content multi_replace_file_content; do
+    assert_eq "$(jq -r --arg c "$c(*)" '.permissions.deny | index($c) != null' <<<"$st")" true "deny $c"
+  done
+}
+
+test_reviewdrv_agy_conversation_ignored() {
+  review_setup
+  export FAKE_AGY_LOG="$T/agy.log" FAKE_AGY_MODE=review SUBCON_CONVERSATION=conv-old
+  run_review_driver agy
+  assert_rc 0 || return 1
+  [[ "$(sed -n 's/^FLAGS=//p' "$T/agy.log" | tail -n 1)" != *--conversation* ]] || fail "a review resumed an old conversation"
+}
+
+test_reviewdrv_agy_implement_unchanged() {
+  review_setup
+  export FAKE_AGY_LOG="$T/agy.log" FAKE_AGY_MODE=partial
+  (
+    cd "$T/rw"
+    export SUBCON_PROMPT_FILE="$T/rj/prompt.txt" SUBCON_JOB_MODEL=m SUBCON_SCHEMA="$ROOT/schema/result.schema.json" SUBCON_TIMEOUT=60s
+    unset SUBCON_ROLE
+    "$ROOT/drivers/agy" "$T/rj"
+  ) >"$T/out" 2>"$T/err"
+  assert_eq "$(jq -r '.permissions.allow | index("command(*)") != null' <<<"$(agy_settings)")" true implement-keeps-command-star
+  [[ "$(sed -n 's/^FLAGS=//p' "$T/agy.log" | tail -n 1)" == *accept-edits* ]] || fail "implement lost accept-edits"
+}
+
+test_reviewdrv_unknown_role() {
+  review_setup
+  local d
+  for d in agy claude opencode; do
+    ( cd "$T/rw"; SUBCON_ROLE=bogus SUBCON_PROMPT_FILE="$T/rj/prompt.txt" SUBCON_JOB_MODEL=m SUBCON_SCHEMA="$ROOT/schema/review.schema.json" \
+        PATH="$(fake_claude_path):$(opencode_path):$PATH" "$ROOT/drivers/$d" "$T/rj" ) >"$T/out" 2>"$T/err" && RC=0 || RC=$?
+    assert_rc 1 || return 1
+    grep -q "unknown role" "$T/err" || fail "$d stderr: $(cat "$T/err")"
+  done
+}
+
+test_reviewdrv_claude_ok() {
+  review_setup
+  export FAKE_CLAUDE_LOG="$T/claude.log" FAKE_CLAUDE_MODE=review
+  PATH="$(fake_claude_path):$PATH" run_review_driver claude claude-haiku-5-5
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r .structured_output.verdict "$T/rj/agy.json")" changes verdict
+  assert_eq "$(jq -r .status "$T/rj/agy.json")" SUCCESS status
+  assert_eq "$(jq -r .cost_usd "$T/rj/agy.json")" 0.02 cost
+  grep -qx -- '--permission-mode dontAsk' "$T/claude.log" || fail "log: $(cat "$T/claude.log")"
+  grep -qx -- '--allowedTools Read,Grep,Glob' "$T/claude.log" || fail "log: $(cat "$T/claude.log")"
+  grep -qx -- '--model claude-haiku-5-5' "$T/claude.log" || fail "log: $(cat "$T/claude.log")"
+  grep -qx -- '--json-schema' "$T/claude.log" || fail "no --json-schema: $(cat "$T/claude.log")"
+  ! grep -Eq 'acceptEdits|Edit|Write|Bash' "$T/claude.log" || fail "write tools present: $(cat "$T/claude.log")"
+  assert_eq "$(git -C "$T/rw" status --porcelain)" "" clone-untouched
+}
+
+test_reviewdrv_claude_isolation() {
+  review_setup
+  export FAKE_CLAUDE_LOG="$T/claude.log" FAKE_CLAUDE_MODE=review SUBCON_CLAUDE_MCP_CONFIG=project SUBCON_CONVERSATION=old-session
+  PATH="$(fake_claude_path):$PATH" run_review_driver claude
+  assert_rc 0 || return 1
+  grep -qx -- '--strict-mcp-config' "$T/claude.log" || fail "MCP not strict: $(cat "$T/claude.log")"
+  grep -qx -- '--mcp-config {"mcpServers":{}}' "$T/claude.log" || fail "MCP not empty: $(cat "$T/claude.log")"
+  ! grep -q -- '--resume' "$T/claude.log" || fail "a review resumed an old session: $(cat "$T/claude.log")"
+  grep -q -- '--session-id' "$T/claude.log" || fail "no fresh session id: $(cat "$T/claude.log")"
+}
+
+test_reviewdrv_opencode_refused() {
+  review_setup
+  PATH="$(opencode_path):$PATH" run_review_driver opencode
+  assert_rc 1 || return 1
+  grep -q "review" "$T/err" || fail "stderr: $(cat "$T/err")"
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

@@ -37,6 +37,13 @@ case "${1:-}" in
     ;;
 esac
 
+# implement (default): edit the working directory. review: read only (see docs/design/reviewer.md).
+role="${SUBCON_ROLE:-implement}"
+case "$role" in
+  implement|review) ;;
+  *) echo "drivers/claude: unknown role: $role" >&2; exit 1 ;;
+esac
+
 job_dir="${1:?job directory required}"
 [[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
 
@@ -56,7 +63,9 @@ generate_uuid() {
   echo "$u"
 }
 
+# A review always starts a fresh session.
 conv="${SUBCON_CONVERSATION:-}"
+[[ "$role" != review ]] || conv=""
 if [[ -z "$conv" ]]; then
   conv="$(generate_uuid)" || {
     echo "drivers/claude: failed to determine conversation id" >&2
@@ -68,14 +77,15 @@ jq -cn --arg c "$conv" '{event: "init", conversation_id: $c}' > "$job_dir/agy.st
 
 # Step 2: launch claude
 session_args=()
-if [[ -n "${SUBCON_CONVERSATION:-}" ]]; then
+if [[ "$role" != review && -n "${SUBCON_CONVERSATION:-}" ]]; then
   session_args=(--resume "$SUBCON_CONVERSATION")
 else
   session_args=(--session-id "$conv")
 fi
 
 mcp_args=()
-if [[ -z "${SUBCON_CLAUDE_MCP_CONFIG:-}" ]]; then
+# A review never gets project MCP servers: their tools may write.
+if [[ "$role" == review || -z "${SUBCON_CLAUDE_MCP_CONFIG:-}" ]]; then
   mcp_args=(--strict-mcp-config --mcp-config '{"mcpServers":{}}')
 elif [[ "$SUBCON_CLAUDE_MCP_CONFIG" == "project" ]]; then
   mcp_args=()
@@ -96,6 +106,14 @@ prompt="$(cat "$SUBCON_PROMPT_FILE")"
 raw_out="$(mktemp)"
 trap 'rm -f "$raw_out"' EXIT
 
+# A review gets read-only tools and denies everything else (dontAsk) instead of prompting.
+permission_mode=acceptEdits
+allowed_tools="Read,Edit,Write,Bash,Grep,Glob"
+if [[ "$role" == review ]]; then
+  permission_mode=dontAsk
+  allowed_tools="Read,Grep,Glob"
+fi
+
 claude_rc=0
 # The prompt goes first: --mcp-config is variadic in claude and would swallow
 # a trailing prompt as another config path. --json-schema takes the schema
@@ -103,8 +121,8 @@ claude_rc=0
 ${timeout_cmd[@]+"${timeout_cmd[@]}"} claude -p "$prompt" \
   --model "$SUBCON_JOB_MODEL" \
   --output-format json \
-  --permission-mode acceptEdits \
-  --allowedTools "Read,Edit,Write,Bash,Grep,Glob" \
+  --permission-mode "$permission_mode" \
+  --allowedTools "$allowed_tools" \
   --json-schema "$(cat "$SUBCON_SCHEMA")" \
   "${session_args[@]}" \
   ${mcp_args[@]+"${mcp_args[@]}"} \
