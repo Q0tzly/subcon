@@ -3452,8 +3452,8 @@ test_reviewtarget_tamper_detected() {
 
 test_reviewtarget_invalid_targets() {
   target_repo
-  echo untracked > new.md
   mkdir -p sub && echo x > sub/a.md && commit_all "sub"
+  echo untracked > new.md
   local bad
   for bad in /etc/passwd ../x ./README.md sub/../README.md '*.md' 'READ?E.md' 'README[1].md' nope.md docs new.md; do
     sub review --target "$bad"
