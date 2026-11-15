@@ -12,7 +12,7 @@ subcon は、実装役となるバックエンド（agy 経由の LLM エージ�
 
 ### 通常実行時（初回）
 
-`lib/prompt.md`（システム前文）の直下に、作業票（`ticket.md`）の内容をそのまま連結したテキストが渡る（区切りは挿入されない）。
+`lib/prompt.md`（システム前文）の直下に、作業票（`ticket.md`）の内容をそのまま連結したテキストが渡る（区切りは挿入されない）。これは実装役（`SUBCON_ROLE=implement`）の場合で、レビュー役は後述の「レビュー役の報告契約」に従う。
 
 前文（`lib/prompt.md`）が課すルール:
 1. **変更範囲の限定**: 作業票の `## Files` に列挙されたファイルのみを作成または変更すること。他のファイルが必要な場合は変更せず停止し、`design_questions` に記録すること。
@@ -60,6 +60,16 @@ subcon は、実装役となるバックエンド（agy 経由の LLM エージ�
 - `"done"`: 作業票の目的を達成し、`## Acceptance` に指定された全コマンドを自身で実行してすべて exit 0 で成功した状態。
 - `"partial"`: 時間切れや手順の途中で終了し、作業が部分的にしか完了していない状態。
 - `"blocked"`: 作業票の前提矛盾、テスト側の不備、権限不足などにより作業の継続が阻害された状態。
+
+## レビュー役の報告契約（`SUBCON_ROLE=review`）
+
+レビュー役（`subcon review`）は、実装役と同じ `SUBCON_PROMPT_FILE` の仕組みで指示を受けるが、前文は `lib/prompt.md` ではなく `lib/review-prompt.md`（読み取り専用レビューの指示）である。対象は、ジョブの場合は票・検査結果・実装役の報告・patch、`--target` の場合は対象ファイル一覧と `--brief`（省略時は既定の観点）。
+
+- **読み取り専用**: 前文のとおり、ファイルを変更せず、リポジトリの状態を変えるコマンドを実行しない。ドライバ側でも書き込み系は止めている（[runner.md](runner.md) の「レビュー役」）。
+- **報告スキーマ**: `schema/review.schema.json` に従う `structured_output` を返す。トップレベルの必須キーは `verdict` / `summary` / `findings` / `unverified` の 4 つで、それ以外のキーは不可。`findings` の各要素は `severity` / `file` / `line` / `summary` / `failure_scenario` / `fix` の 6 つで、それ以外のキーは不可。
+- **判定の規則**: 前文は「`approve` は指摘がゼロのときだけ」「S1 があれば `approve` にしない」と定める。ホスト側の整合検査（`review_validate`）は、そのうち `findings` が空なのに `approve` 以外、または S1 があるのに `approve` のときだけを不整合として拒否する。詳細は [files.md](files.md) の「schema/review.schema.json」。
+- **会話**: 毎回新しい会話。`SUBCON_CONVERSATION` は渡さず、`resume` は使わない。会話 ID は記録しない。
+- **結果の回収**: ドライバは `agy.json` に、`status`（`SUCCESS` / `ERROR`）、`structured_output`、`error`、`usage`、`duration_seconds`、`cost_usd` を書く。ホストは `structured_output` を検査して `review-<n>.json`（ジョブ）または `review.json`（`--target`）に保存し、`status` と `structured_output` の欠落・不整合は失敗（終了コード 4）として扱う。
 
 ## agy.json のうち subcon が解釈する項目
 

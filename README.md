@@ -26,16 +26,20 @@ subcon wait --timeout 540 <id>...  # 結果 JSON を待つ
 subcon diff <id>                   # パッチを読む
 subcon log <id>                    # ジョブのログを見る
 subcon apply <id>                  # 作業ツリーに当てる
+subcon review <id>                 # 読み取り専用のレビュー役に patch を読ませる（任意）
+subcon reviews                     # レビューの一覧
 subcon discard <id>                # ジョブを消す
 subcon guide                       # ルール（docs/delegation.md）を表示
 subcon trailer                     # コミット用の Co-Authored-By 行
 ```
 
-ほかに `run`（submit + wait）、`show`、`list`、`commit`（`subcon commit`: 検収した変更を trailer 付きでコミットする）、`reject`（`subcon reject`: 理由を票に記録して差し戻し、再委任する）、`resume`（失敗したジョブをドライバの会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
+ほかに `run`（submit + wait）、`show`、`list`、`commit`（`subcon commit`: 検収した変更を trailer 付きでコミットする。最新のレビューがあれば `Reviewed-By` も足す）、`reject`（`subcon reject`: 理由を票に記録して差し戻し、再委任する）、`resume`（失敗したジョブをドライバの会話ごと再開）、`stats`（履歴の集計）。ジョブは `~/.local/state/subcon/jobs/` に保存され、それぞれ専用の git worktree で実行される。
 
 ### ドライバ
 
 実装役は `--driver <name>` または環境変数 `SUBCON_DRIVER` で選ぶ。既定は `agy`。
+
+レビュー役（`subcon review`）は実装役と独立に選ぶ（`--driver` / `SUBCON_REVIEW_DRIVER`、`--model` / `SUBCON_REVIEW_MODEL`）。既定は agy の Hydrogen（`gemini-4-hydrogen-high`）で、レビューは常にローカルで動き、`--runner` は使えない。agy を使うレビューにも、下の「現状の制約」の消費者ログインの注意がそのまま当てはまる。
 
 - `agy`: Gemini Flash（既定モデル `gemini-4-hydrogen-medium`）。
 - `claude`: Claude Code（既定モデル `claude-haiku-5-5`）。
@@ -69,7 +73,7 @@ subcon submit --runner ci <ticket>...
 - **self-hosted（自分のマシンで Actions を回す）**: 実行と agy の認証が利用者自身のマシンに留まるルート。自分の CI／スクリプトから直接 `agy` を呼ぶ限り、消費者サブスクリプションのログインも利用できる（下記「現状の制約」を参照）。エージェントに自動実行を任せる場合は API キー方式を使う。
 - **GitHub ホスト型ランナー**: API キー方式が必須で、有料ティアが前提（無料枠は 5 リクエスト/分で、エージェント実行には不足する）。
 
-終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。
+終了コード: `0` 成功 / `1` 使い方の誤り / `2` Flash が partial・blocked / `3` チェック違反 / `4` ジョブ失敗 / `5` wait のタイムアウト。`review` の終了コードは `0` / `1` / `2`（S1 の指摘あり）/ `4`（レビュー失敗）で、詳細は [docs/spec/cli.md](docs/spec/cli.md) の「review」節。
 
 ## Muse から使う
 
@@ -97,7 +101,7 @@ tests/run.sh submit     # グループ指定: ticket submit query manage history
 ## 現状の制約
 
 - local ランナーでは、agy のサンドボックスは Flash がサンドボックス外で実行するのを止められない（詳細は docs/delegation.md）。隔離が必要なときは container ランナーを使う。container ランナーでもネットワークは隔離されない（agy が API に到達するため）
-- agy の認証が消費者向け Google ログインの場合、`submit` / `resume` は警告を出す。Google の公式 FAQ は、消費者プランのログインをサードパーティ製エージェントやアプリから使うことを規約違反としており、Google アカウント全体の停止・終了の対象になると明記している。subcon 経由で agy を使う形は、起動するのが利用者自身でも「アプリによるラップ」に当たりうる。特に、上位エージェント（Claude Code 等）が subcon を起動して回す運用は、FAQ が非対応とする形そのものである。規約に適合する使い方は2つある。(1) API キー方式: `~/.gemini/antigravity-cli/settings.json` の `modelProvider` を `gemini` にし、`GEMINI_API_KEY` を設定する（キーは Google AI Studio で発行する）。エージェント経由の自動化には、公式が推奨するこの経路を使う。(2) 利用者自身のスクリプト／CI から `agy` を直接呼び出す形（subcon を介さない）。過去に許容と読める案内があったが、現行の FAQ が優先する。詳細は docs/delegation.md。
+- agy の認証が消費者向け Google ログインの場合、`submit` / `resume` / `review` は警告を出す。Google の公式 FAQ は、消費者プランのログインをサードパーティ製エージェントやアプリから使うことを規約違反としており、Google アカウント全体の停止・終了の対象になると明記している。subcon 経由で agy を使う形は、起動するのが利用者自身でも「アプリによるラップ」に当たりうる。特に、上位エージェント（Claude Code 等）が subcon を起動して回す運用は、FAQ が非対応とする形そのものである。規約に適合する使い方は2つある。(1) API キー方式: `~/.gemini/antigravity-cli/settings.json` の `modelProvider` を `gemini` にし、`GEMINI_API_KEY` を設定する（キーは Google AI Studio で発行する）。エージェント経由の自動化には、公式が推奨するこの経路を使う。(2) 利用者自身のスクリプト／CI から `agy` を直接呼び出す形（subcon を介さない）。過去に許容と読める案内があったが、現行の FAQ が優先する。詳細は docs/delegation.md。
 
 ## ライセンス
 

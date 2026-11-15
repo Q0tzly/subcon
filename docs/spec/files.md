@@ -147,6 +147,77 @@
 
 ジョブが実行中（`state` が `"queued"` または `"running"`）に `subcon show` や `subcon wait`（タイムアウト時）によって参照された場合、`v`, `id`, `repo`, `ticket`, `state` のほか、`issue`（meta に記録されたオブジェクト、無ければ `null`）が設定され、それ以外のすべてのフィールドは `null` となる。
 
+## レビュー結果（review）
+
+`subcon review` の結果は、レビューの対象に応じて次のどちらかに残る。どちらも、`.meta.json`（記録、成功・失敗のどちらでも作られる）、`.json`（結果、成功時のみ）、`.stream`（ドライバの出力、ドライバが書いた場合のみ）の組である。
+
+- ジョブ対象: `${SUBCON_STATE}/jobs/<id>/review-<n>.json`、`review-<n>.meta.json`、`review-<n>.stream`。`<n>` はそのジョブ内で 1 から始まる番号。
+- `--target` 対象: `${SUBCON_STATE}/reviews/<review-id>/review.json`、`review.meta.json`、`review.stream`。`<review-id>` は UTC の `<YYYYmmdd-HHMMSS>-<4桁hex>`。
+
+### 番号と予約
+
+ジョブ対象の `<n>` は、既存の `review-*.meta.json` の最大番号に 1 を足したもの。同時に走る複数のレビューが同じ番号を取らないよう、実行前に `review-<n>.meta.json` を排他的に作成し、中身を `{"v":1,"error":"review in progress or interrupted"}` とする。レビューが終われば本来の meta で置き換わる。途中で止まって予約だけが残ったものは、`error` が入った失敗レビューとして番号を消費する。この予約には `repo` が無いため、`subcon reviews` の一覧には出ない。
+
+### `.json`（結果）
+
+`schema/review.schema.json` に従って検証済みの結果オブジェクトそのもの（`structured_output` をそのまま保存する。エンベロープは無い）。成功したレビューだけに作られる。
+
+### `.meta.json`
+
+```json
+{
+  "v": 1,
+  "id": "20261111-180000-01-parser-a1b2-r1",
+  "job_id": "20261111-180000-01-parser-a1b2",
+  "target_type": "job",
+  "repo": "/path/to/repo",
+  "created_at": "2026-11-11T09:20:00Z",
+  "driver": "agy",
+  "model": "gemini-4-hydrogen-high",
+  "duration_seconds": 120.5,
+  "cost_usd": 0.31,
+  "usage": {
+    "input_tokens": 9000,
+    "output_tokens": 800,
+    "total_tokens": 9800,
+    "cache_read_tokens": 4000,
+    "thinking_tokens": 0
+  },
+  "error": null
+}
+```
+
+- `v`: 整数 `1`。
+- `id`: ジョブ対象は `<job-id>-r<n>`、`--target` は `<review-id>`。
+- `job_id`: ジョブ対象ではジョブ ID（文字列）、`--target` では `null`。
+- `target_type`: `"job"` または `"target"`。
+- `repo`: 対象リポジトリの絶対パス（文字列）。`subcon reviews` はこの値で現在のリポジトリのレビューを選ぶ。
+- `created_at`: レビューの作成時刻（ISO 8601 UTC 文字列）。
+- `driver`, `model`: レビュー役のドライバ名とモデル ID（文字列）。
+- `duration_seconds`, `cost_usd`, `usage`: ドライバの `agy.json` から写す。無ければ `null`。`usage` の形は `backend.md` の `agy.json` の項と同じ。
+- `error`: 失敗理由（文字列）。成功時は `null`。
+- `--target` のレビューだけ、次の 3 つが追加される: `head`（レビュー時の HEAD のコミット SHA、文字列）、`targets`（対象パスの配列、文字列配列）、`brief`（`--brief` で指定されたパス、文字列。無ければ `null`）。
+
+### `schema/review.schema.json`
+
+レビュー役の報告の形を定める JSON Schema（`lib/review.sh` の `review_validate` が同じ規則を検査する）。
+
+- トップレベルのキーは `verdict`、`summary`、`findings`、`unverified` の 4 つで、すべて必須。それ以外のキーは不可。
+  - `verdict`: `"approve"` / `"changes"` / `"reject"` のいずれか。
+  - `summary`: 文字列。
+  - `findings`: 配列。各要素は次のとおり。
+    - `severity`: `"S1"` / `"S2"` / `"S3"` のいずれか。
+    - `file`: 文字列（リポジトリ内のパス）。
+    - `line`: 整数で 0 以上。1 始まりの行番号で、行を特定できないときは `0`。
+    - `summary`、`failure_scenario`、`fix`: 文字列。
+    - 6 つのキーがすべて必須で、それ以外のキーは不可。
+  - `unverified`: 文字列の配列。読めなかった・確かめられなかった事項。
+- 整合規則（ホストが検査する）:
+  - `findings` が空なら `verdict` は `"approve"` でなければならない（空なのに `changes` / `reject` は不整合）。
+  - `findings` に S1 が 1 件以上あれば `verdict` は `"approve"` であってはならない。
+  - S2 / S3 だけの `"approve"` は、ホストの検査では受理される。レビュー役への指示文（`lib/review-prompt.md`）は「指摘があれば `approve` にしない」と定めているので、指示文のほうが厳しい。
+- 結果の集計（`s1` / `s2` / `s3`）は、`findings` の `severity` の件数で数える。
+
 ## history.jsonl
 
 利用統計・委任履歴を記録する追記専用ファイル（JSON Lines 形式）。`${SUBCON_STATE}/history.jsonl` に保存され、ジョブが `discard` されても保持される。
@@ -157,6 +228,7 @@
 
 - `type == "job"`: ジョブ完了時の finalize 行。
 - `type == "event"`: ジョブに対する操作（apply, commit, reject 等）の event 行。
+- `type == "review"`: 成功したレビューの行（下記「review 行」）。
 
 旧バージョンで記録された `v` フィールドを持たない行についても、後方互換性をもって読み込み可能でなければならない。
 
@@ -230,6 +302,22 @@
 - `id`: 対象ジョブの ID。
 - `event`: イベント種別（文字列: `"applied"`, `"committed"`, `"rejected"`）。
 - `at`: イベント発生時刻（ISO 8601 UTC 文字列）。
+
+### review 行 (`type: "review"`)
+
+成功したレビューごとに 1 行が書かれる（結果が保存された後）。失敗したレビューは書かない。
+
+```json
+{"type":"review","v":1,"id":"20261111-180000-01-parser-a1b2-r1","target_type":"job","job_id":"20261111-180000-01-parser-a1b2","repo":"/path/to/repo","created_at":"2026-11-11T09:20:00Z","driver":"agy","model":"gemini-4-hydrogen-high","verdict":"changes","s1":0,"s2":2,"s3":1,"duration_s":120.5,"cost_usd":0.31,"tokens":{"input":9000,"output":800,"total":9800,"cache_read":4000,"thinking":0}}
+```
+
+- `type`: 固定値 `"review"`。`v`: 整数 `1`。
+- `id`, `target_type`, `job_id`, `repo`, `created_at`, `driver`, `model`: `.meta.json` の同名のフィールドを写す。
+- `verdict`: 結果の `verdict`。`s1` / `s2` / `s3`: 結果の `findings` を重大度ごとに数えた件数（整数）。
+- `duration_s`, `cost_usd`: `.meta.json` の `duration_seconds`、`cost_usd` を写す（無ければ `null`）。
+- `tokens`: finalize 行の `tokens` と同じ形（`input` / `output` / `total` / `cache_read` / `thinking`）。`usage` が無ければ `null`。
+
+`stats` と `export` は `type == "job"`（と `stats` では `type == "event"`）だけを読むため、review 行は集計にも書き出しにも入らない。
 
 ## state ファイルと patch.diff の位置づけ
 

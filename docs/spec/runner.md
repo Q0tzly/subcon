@@ -45,7 +45,8 @@
 | --- | --- | --- |
 | `SUBCON_DRIVER` | subcon 本体 | 選択されたドライバ名。ランナーは `drivers/<name>` を起動する |
 | `SUBCON_PROMPT_FILE` | subcon 本体 | バックエンドに渡すプロンプトファイルの絶対パス（前文と票、または resume プロンプトが書き込まれている） |
-| `SUBCON_SCHEMA` | subcon 本体 | バックエンドの報告フォーマットを強制する JSON スキーマファイルのパス（`schema/result.schema.json`） |
+| `SUBCON_SCHEMA` | subcon 本体 | バックエンドの報告フォーマットを強制する JSON スキーマファイルのパス（`schema/result.schema.json`。レビュー役のときは `schema/review.schema.json`） |
+| `SUBCON_ROLE` | subcon 本体 | ドライバが担う役割。`implement`（既定。未設定時も同じ）または `review`（読み取り専用のレビュー役。下記「レビュー役」）。それ以外の値は終了コード 1 で失敗する |
 | `SUBCON_JOB_MODEL` | subcon 本体 | ジョブで実行するドライバのモデル ID（例: `gemini-3.8-flash-medium`） |
 | `SUBCON_TIMEOUT` | subcon 本体 | ドライバに渡すタイムアウト文字列（例: `30m`） |
 | `SUBCON_CONVERSATION` | subcon 本体 | 再開（`resume`）時に引き継ぐドライバの会話 ID（初回実行時は未設定） |
@@ -127,3 +128,36 @@ GitHub Actions の self-hosted ランナー上でジョブを実行するリモ�
   - 鍵は GitHub Secrets や制御面には置かず、ランナーマシン上にだけ置く。`agy` ジョブは認証に一切触れない。
 - **resume の制限**:
   - CI ランナーでは `subcon resume` による再開は不可（会話 DB はリモートの CI マシン側にのみ保存され、ホスト側での前回収穫パッチの適用と噛み合わないため）。
+
+## レビュー役（`SUBCON_ROLE=review`）
+
+`subcon review` は、ランナーを経由せずホストからドライバを直接起動する（`lib/review.sh` の `review_run_driver`）。レビューは常にローカルで動き、`--runner` は受け付けない。ランナーの前提条件（`work/` の隔離、ジョブの `meta.json` / `ticket.md`）は使わない。
+
+作業ディレクトリは、ジョブの `base` に patch を当てて自己コミットした一時 clone（ジョブ対象）、または HEAD の一時 clone（`--target` 対象）。ドライバはその clone の中で動く。
+
+起動時に subcon が設定する変数:
+
+- `SUBCON_ROLE=review`
+- `SUBCON_DRIVER`（レビュー役のドライバ名）、`SUBCON_JOB_MODEL`（レビュー役のモデル）、`SUBCON_TIMEOUT`
+- `SUBCON_PROMPT_FILE`: レビュー用の指示と対象（票、報告、patch、または `--target` のファイル一覧と観点）を書いたファイル。
+- `SUBCON_SCHEMA=schema/review.schema.json`
+- `SUBCON_CONVERSATION` は必ず未設定。レビューは毎回新しい会話で、resume しない。
+
+ドライバの第 1 引数は一時領域のディレクトリで、ここに `agy.json` と `agy.stream` を書く。標準出力と標準エラーはまとめて同じディレクトリの `log` に残る。
+
+ドライバごとの挙動:
+
+| ドライバ | `SUBCON_ROLE=review` のときの挙動 |
+| --- | --- |
+| `agy` | 読み取り専用。`--mode accept-edits` を付けない。`--settings` の許可リストは clone の読み取り（`read_file`）と `cat` / `ls` / `head` / `tail` / `grep` / `wc` だけ。`git`・`gh`・`sudo`・`rm`・編集系ツールは deny。許可リストに無いものは headless で自動拒否される。 |
+| `claude` | `--permission-mode dontAsk`。許可ツールは `Read` / `Grep` / `Glob` のみ。`--disallowedTools` で `Edit` / `Write` / `Bash` / `NotebookEdit` / `WebFetch` / `WebSearch` を禁止する。MCP は常に無効（`SUBCON_CLAUDE_MCP_CONFIG` の設定にかかわらず空の設定を渡す）。 |
+| `opencode` | レビューを拒否する。`drivers/opencode: the review role is not supported` を標準エラーに出して終了コード 1。`agy.json` は書かない。 |
+| その他・未知の役割 | `SUBCON_ROLE` が `implement` / `review` 以外なら、各ドライバは終了コード 1 で終了する。 |
+
+ドライバが終了した後、ホスト（`lib/review.sh`）は次を確かめる。どれか 1 つでも満たさなければレビューは失敗（終了コード 4）になる。
+
+- clone が展開直後のコミットのまま変わっていない（新規・変更・無視されていないファイルも無い）。レビュー役が書き込んでいれば `reviewer modified files`。
+- `agy.json` があり、`status` が `SUCCESS` でドライバの終了コードが 0。
+- `agy.json` の `structured_output` が `schema/review.schema.json` の形と整合規則に合う（[files.md](files.md) の「schema/review.schema.json」、[backend.md](backend.md) の「レビュー役の報告契約」を参照）。
+
+なお、実装役（`SUBCON_ROLE` 未設定または `implement`）の挙動は上の表の各項目とは別で、従来どおり。

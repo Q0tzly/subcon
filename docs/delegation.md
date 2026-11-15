@@ -11,6 +11,7 @@ git add docs/design/myfeat && git commit -m "add: ticket for parser"
 subcon submit docs/design/myfeat/01-*.md docs/design/myfeat/02-*.md   # 独立した票は並行に
 subcon wait --timeout 540 <id> <id>             # 終了コード 5 なら繰り返す
 subcon diff <id>                                # 全部読む
+subcon review <id>                              # 任意: 読み取り専用のレビュー（指摘は上位が仕分ける）
 subcon apply <id>                               # 作業ツリーに当てる（コミットはしない）
 <Acceptance のコマンドを自分で実行>
 subcon commit -m "feat: ..." <id>               # trailer を自動付与（要 SUBCON_REVIEWER。修正時は --edited）
@@ -52,6 +53,16 @@ stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは 
 
 - サブエージェントには、票のパス・この手順（`subcon guide`）・やってはいけないこと・最終報告の形（票ごとに確かめたこと、見つけた問題と対処、コミット、未検証の点）を渡す
 - 2026-11 の試行（票 10・11、`subcon stats`）: Sonnet の検収で実装の見逃しは無かった。Sonnet は仕様外の問題（強制終了でロックが残る）と仕様の曖昧さ（丸めの桁）も報告した。サブエージェントのトークンは 2 票で約 8 万
+
+### レビュー役（`subcon review`）
+
+別系統のモデルに読み取り専用でレビューさせる経路。既定は agy の Hydrogen（`gemini-4-hydrogen-high`）で、実装役とは独立に選ぶ（`--driver` / `--model`、または `SUBCON_REVIEW_DRIVER` / `SUBCON_REVIEW_MODEL`）。
+
+- **使う順番**: ジョブが `finished` になったら、`diff` を読んだ後、自分で Acceptance を実行する前に `subcon review <id>` を走らせる。レビューは `base` と `patch.diff` から作った別の clone で読むので、`apply` の前後どちらでも結果は同じ。
+- **指摘は鵜呑みにしない**: 上位が仕分ける。`file` / `line` / `failure_scenario` を実際に読んで確かめ、採否を決める。S1 でも誤りはありうる。`unverified` に挙がった事項は、上位が自分で確かめる。
+- **失敗しても検収は止めない**: 終了コード 4（レビュー失敗）でも、検収は自分で続けてよい。レビューは検収の代わりでも必須条件でもない。
+- **コミットへの反映**: `subcon commit` は、最新のレビューの `verdict` が `reject` でなければ `Reviewed-By` にレビュー役のモデルを足す。S1 があれば stderr に警告を出すが、コミットは止まらない。通すかどうかは上位が決める。
+- **設計 doc・票のレビュー**: `subcon review --target <path>...`（コミット済みのファイル）。ジョブは作らない。
 
 ## 作業票
 

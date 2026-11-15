@@ -20,8 +20,10 @@
 | `subcon diff <id>` | ジョブの `patch.diff` をそのまま出力する | テキスト: Unified diff 形式（パッチテキスト） |
 | `subcon log <id>` | ジョブの実行ログ（ジョブディレクトリの `log` ファイル）をそのまま出力する。実行中のジョブでも読める | テキスト: ログテキスト |
 | `subcon apply <id>` | ジョブのパッチを現在の作業ツリーに適用する（インデックスは触らず、コミットはしない） | 単体オブジェクト: `{"id": "...", "applied": true}` |
-| `subcon commit -m <message> [--edited] <id>` | 検収済みの変更をステージングし、trailer（`Co-Authored-By` / `Reviewed-By`、および issue 参照がある場合は `Closes`）を付与してコミットする | 単体オブジェクト: `{"id": "...", "commit": "<hash>"}` |
+| `subcon commit -m <message> [--edited] <id>` | 検収済みの変更をステージングし、trailer（`Co-Authored-By` / `Reviewed-By`、および issue 参照がある場合は `Closes`）を付与してコミットする。`Reviewed-By` は最新のレビューから足す（「commit 時の Reviewed-By 付与」節） | 単体オブジェクト: `{"id": "...", "commit": "<hash>"}` |
 | `subcon checks <id>` | 終了済みジョブ（`finished` または `failed`）の checks を現在の repo にある票ファイルから再計算して result.json を更新する | 単体オブジェクト: 更新後の checks オブジェクト |
+| `subcon review [--driver D] [--model M] [--timeout T] <job-id>` / `subcon review [--driver D] [--model M] [--timeout T] --target <path>... [--brief <file>]` | 読み取り専用のレビュー役に、終了済みジョブの patch（`<job-id>` 指定）または HEAD の対象ファイル（`--target`）をレビューさせる。結果を記録するだけで、コミットは止めない。詳細は「review」節 | 単体オブジェクト: `{"id": "...", "verdict": "approve"\|"changes"\|"reject"\|null, "s1": n, "s2": n, "s3": n, "path": "..."\|null}`（失敗時は `"error"` が入り、`verdict` と `path` は `null`） |
+| `subcon reviews [<job-id>]` | レビューの記録を一覧する。`<job-id>` を指定するとそのジョブのレビューだけ、省略すると現在のリポジトリのジョブのレビューと `--target` のレビューを対象にする | 配列: `[{"id": "...", "target_type": "job"\|"target", "verdict": "..."\|null, "s1": n\|null, ...}]`（作成日時の降順） |
 | `subcon reject -m <reason> [--model M] [--runner R] <id>` | 差し戻し理由を票の `## Notes` に追記してコミットし、同一票を再委任する | 単体オブジェクト: `{"id": "..."|"null", "reject_of": "...", "ticket": "...", "error": "..."|"null"}` |
 | `subcon discard <id>...` | 指定したジョブの作業領域およびジョブディレクトリを削除する。実行中のプロセスは停止させる | 単体オブジェクト: `{"discarded": ["<id>", ...]}` |
 | `subcon stats [--all] [--since <N>d\|<N>h] [--text]` | 履歴ファイル（`history.jsonl`）を集計して統計を出力する | 単体オブジェクト: 集計 JSON（`--text` 指定時は人間向けのテキスト表） |
@@ -30,6 +32,39 @@
 | `subcon trailer [--model M] [--driver D]` | コミットメッセージに付与する `Co-Authored-By` 行を表示する。ドライバ・モデルは `--driver` / `--model` > 環境変数 `SUBCON_DRIVER`（モデルは `SUBCON_MODEL` も含む既定）> このリポジトリの直近ジョブ（ドライバとモデル）> `agy` の順に決める | テキスト: `Co-Authored-By: <Model Name> <email>` |
 
 ドライバの事前確認（preflight）: `submit`, `run`, `resume`, `commit`, `reject`, `trailer` は、実行前に選択中ドライバ（既定は `agy`、`resume` は元ジョブに記録されたドライバ）の `preflight` を呼ぶ。実行できない場合は処理を開始せず、終了コード 1 で失敗する。agy ドライバの場合は `PATH` または `$HOME/.local/bin/agy` からバイナリを解決し、見つからなければ `agy not found` を含むエラーで失敗する。
+
+### review（読み取り専用レビュー）
+
+レビュー役は、実装役とは独立のドライバ・モデルで、変更を読んで指摘を返す。実装役と同じ `SUBCON_DRIVER` / `SUBCON_MODEL` は使わない。
+
+- **対象（ジョブ）**: `subcon review <job-id>`。ジョブの状態が `finished` でなければ終了コード 1 で失敗する。レビューは、ジョブの `base` を別の一時 clone に展開し、`patch.diff` を当てて自己コミットしたスナップショット（`subcon: review snapshot`）の上で行う。上位の作業ツリーと、ジョブの `apply` 状態には依存しない。
+- **対象（ファイル）**: `subcon review --target <path>...`。`<path>` は HEAD にコミット済みのファイルを、リポジトリルートからの相対パスで指定する（絶対パス、`.` / `..` の要素、glob 文字、未コミットのファイルは終了コード 1）。HEAD を一時 clone に展開して読ませる。ジョブは作らない。
+- **`--brief <file>`**: 観点を書いたファイルを渡す（`--target` 専用。ジョブ対象との併用は終了コード 1）。省略時は対象ファイルの誤り・矛盾・抜けを見る。
+- **ランナー**: 常にローカルで動く。`--runner` は受け付けない（ドライバ直接起動。[runner.md](runner.md) の「レビュー役」を参照）。
+- **ドライバ・モデルの選び方**: `--driver` / `--model` > 環境変数 `SUBCON_REVIEW_DRIVER` / `SUBCON_REVIEW_MODEL` > 既定（ドライバ `agy`、モデル `gemini-4-hydrogen-high`。他のドライバでは各ドライバの `default-model`）。
+- **書き込み禁止**: レビュー役の後に一時 clone の HEAD が変わっているか、作業ツリーに変更・未追跡ファイルがあれば、結果を捨てて失敗（終了コード 4、`error: "reviewer modified files"`）とする。
+- **記録**: 成功・失敗のどちらも、レビューごとに `.meta.json` を残し、成功時は結果の `.json` を、ドライバが出力した場合は `.stream` を残す。保存先とファイル形式は [files.md](files.md) の「レビュー結果」を参照。番号は同じジョブ内で重複せず、失敗したレビューの番号も再利用しない。
+
+終了コード（`review`）:
+
+| コード | 意味 |
+| --- | --- |
+| 0 | レビューが完了し、S1 の指摘が無い（`approve` / `changes` / `reject` のいずれでも、S1 が 0 件なら 0） |
+| 1 | 使い方の誤り・前提の不足（ジョブが `finished` でない、未知のジョブ ID、ドライバの前提不足、`--target` の不正、`--brief` の読めないなど） |
+| 2 | レビューは完了したが、S1 の指摘が 1 件以上ある |
+| 4 | レビューの実行に失敗（ドライバのエラー、タイムアウト、結果が `schema/review.schema.json` に合わない、レビュー役がファイルを変えた など）。結果ファイルは作られず、`.meta.json` に `error` が残る |
+
+`review` は `review_conduct` の戻り値をそのまま返す。`5` は使わない。
+
+### commit 時の Reviewed-By 付与
+
+`subcon commit` は、ジョブに**最新の**レビュー（同じジョブ内で番号が最大の `review-<n>.json`）があり、それが読めて整合している場合、レビュー役のモデルを `Reviewed-By` 行として足す。
+
+- `verdict` が `reject` のときは足さない。`approve` / `changes` のときは足す。
+- 上位の `SUBCON_REVIEWER` と同じ行になる場合は足さない（重複させない）。`--edited` の有無にも依らない。
+- 最新のレビューに S1 が 1 件以上あれば、stderr に `subcon: warning: the latest review (review-<n>) has <k> S1 finding(s)` を出す。コミットは止めない（終了コード 0）。
+- 最新のレビューが読めない（`.meta.json` が無い、結果が壊れている など）場合は「レビューが無い」と同じ扱いで、`Reviewed-By` は足さない。
+- 対象が `--target` のレビューは、ジョブのコミットには使われない。
 
 ### reject の委任上限
 
@@ -56,7 +91,8 @@
     - `resume <id>`: 単一の ID を受け取るが、`submit` と同等のジョブ生成インターフェースとして配列 `[{...}]` を返す。
     - `wait <id>...`: 複数のジョブを同時に待機できるため、各ジョブの結果オブジェクトの配列 `[{...}, ...]` を返す。
     - `list [--all]`: 複数のジョブの一覧を表すため、ジョブ要約の配列 `[{...}, ...]` を返す。
-  - 単一ジョブまたは単一操作を扱うコマンド（`run`, `show`, `new`, `apply`, `commit`, `checks`, `reject`, `discard`, `stats`）は単体オブジェクト `{...}` を返す。
+    - `reviews [<job-id>]`: レビューの記録の一覧を表すため、レビュー要約の配列 `[{...}, ...]` を返す。
+  - 単一ジョブまたは単一操作を扱うコマンド（`run`, `show`, `new`, `apply`, `commit`, `checks`, `reject`, `discard`, `stats`, `review`）は単体オブジェクト `{...}` を返す。
 - **版 (v) の付与**: ジョブ結果オブジェクト（`show` / `wait` / `run` が返すもの）には `v: 1` が付く。`list` の要約オブジェクトと `stats` の集計オブジェクトには `v` を付けない。
 
 ## 終了コード表
@@ -104,6 +140,7 @@
 - `--model M`: 選択したドライバに渡すモデル ID を指定する。既定値は環境変数 `SUBCON_MODEL` の値、未設定時はドライバごとの既定モデル（`trailer` でドライバを直近ジョブから引いた場合は、そのジョブのモデル。`--driver` / `SUBCON_DRIVER` を指定した場合は引かない）（`agy`: `gemini-4-hydrogen-medium`、`claude`: `claude-haiku-5-5`）。
 - `--timeout T`（`submit` / `run` / `resume`）: ドライバに渡すタイムアウト文字列（例: `30m`, `540s`）。既定値は `30m`（`resume` で省略時は再開元ジョブの設定値を引き継ぐ）。
 - `--timeout T`（`wait`）: 待機する時間。整数のみ（秒、従来どおり）、または単位付き `<N>s` / `<N>m` / `<N>h`（N は0以上の整数）。既定値は `0`（無期限）。指定時間が経過しても完了していないジョブがある場合、その時点の結果（未終了ジョブは `state: queued` または `running`）を出力して終了コード 5 で終了する（ジョブ自体は停止させない）。不正な値（負数・小数・不明な単位・文字列など）は終了コード 1 で失敗する。
+- `--driver D` / `--model M` / `--timeout T`（`review`）: レビュー役のドライバ・モデル・タイムアウト（既定 `30m`）。`--runner` は受け付けない。解決の順序は「review」節と環境変数の節を参照。
 - `--issue <ref>`（`submit` / `run`）: 票の発生元 issue への参照を指定する。受理する形式は `#123`（カレントリポジトリの origin リモートが GitHub の場合）、`owner/repo#123`、および `https://github.com/owner/repo/issues/123`。番号は 1 以上の整数でなければならない。形式不正や origin が取得できない場合はエラーとなり、ジョブは作成されない。`resume` で作られる新ジョブは元ジョブの issue を引き継ぐ。
 
 ## 利用者向け環境変数
@@ -112,6 +149,8 @@
 
 - `SUBCON_DRIVER`: 既定で使う実装役ドライバ名（未設定時は `agy`）。`--driver` で上書きできる。
 - `SUBCON_MODEL`: 既定で使用するモデル ID（意味は選択中ドライバのモデル ID 空間。未設定時はドライバごとの既定モデル）。
+- `SUBCON_REVIEW_DRIVER`: `subcon review` が使うレビュー役ドライバ名（未設定時は `agy`）。`--driver` で上書きできる。実装役の `SUBCON_DRIVER` とは独立。
+- `SUBCON_REVIEW_MODEL`: `subcon review` が使うレビュー役のモデル ID（未設定時は、`agy` なら `gemini-4-hydrogen-high`、他のドライバならそのドライバの既定）。`--model` で上書きできる。実装役の `SUBCON_MODEL` とは独立。
 - `SUBCON_CLAUDE_MCP_CONFIG`: `claude` ドライバの MCP 設定の上書き口。未設定時は MCP を無効化する（厳格・空）。`project` のときは claude の既定動作に任せる。それ以外の値は MCP 設定 JSON として渡す。
 - `SUBCON_STATE`: subcon の状態ディレクトリのルートパス。ジョブや履歴がここに保存される（未設定時は `${XDG_STATE_HOME:-$HOME/.local/state}/subcon`）。
 - `SUBCON_REVIEWER`: コミット時のレビュアー情報（`Name <email>` 形式）。`subcon commit` を実行する際に設定が必須（未設定時は終了コード 1）。
