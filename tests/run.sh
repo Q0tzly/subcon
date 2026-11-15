@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv reviewjob (all when none given).
+# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv reviewjob reviewtarget reviews reviewcommit (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -3373,10 +3373,288 @@ test_reviewjob_cleanup_on_term() {
   return 0
 }
 
+# ---- subcon review --target and subcon reviews (ticket 61) --------------------
+
+# target_repo: commit docs/design.md next to README.md, and leave a brief outside the repository.
+target_repo() {
+  printf '# design\nline two\n' > docs/design.md
+  commit_all "add design"
+  printf 'Check the numbered steps.\n' > "$T/brief.md"
+  rtmp
+}
+
+# review_dir_of: the directory of the review whose id is in OUT.
+review_dir_of() { echo "$SUBCON_STATE/reviews/$(jget .id)"; }
+
+test_reviewtarget_ok() {
+  target_repo
+  export FAKE_AGY_LOG="$T/agy.log" FAKE_AGY_PROMPT_OUT="$T/prompt.out"
+  FAKE_AGY_MODE=review sub review --target docs/design.md --target README.md --brief "$T/brief.md"
+  assert_rc 0 || return 1
+  assert_match "$(jget .id)" '^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$' id
+  assert_eq "$(jget '[.verdict,.s1,.s2,.s3] | join(",")')" changes,0,1,0 summary
+  local d
+  d="$(review_dir_of)"
+  assert_eq "$(jget .path)" "$d/review.json" path
+  rv review_validate "$d/review.json" 2>"$T/err" || fail "stored review invalid: $(cat "$T/err")"
+  [[ -s "$d/review.stream" ]] || fail "review.stream missing"
+  local m="$d/review.meta.json"
+  assert_eq "$(jq -r '[.v,.id,(.job_id|tostring),.target_type,.driver,.model,.repo,.head,(.error|tostring),.brief] | join("|")' "$m")" \
+    "1|$(jget .id)|null|target|agy|gemini-4-hydrogen-high|$TOP|$(git rev-parse HEAD)|null|$T/brief.md" meta
+  assert_eq "$(jq -c .targets "$m")" '["docs/design.md","README.md"]' targets
+  local h
+  h="$(grep '"type":"review"' "$SUBCON_STATE/history.jsonl" | tail -n 1)"
+  assert_eq "$(jq -r '[.id,.target_type,(.job_id|tostring),.verdict] | join("|")' <<<"$h")" "$(jget .id)|target|null|changes" history
+  # the reviewer ran in a clone of HEAD, and the prompt names the targets and carries the brief
+  [[ "$(sed -n 's/^PWD=//p' "$T/agy.log" | tail -n 1)" != "$TOP" ]] || fail "reviewer ran in the repository"
+  assert_eq "$(sed -n 's/^HEAD=//p' "$T/agy.log" | tail -n 1)" "subcon: review snapshot" snapshot-commit
+  local p="$T/prompt.out"
+  grep -q "Do not modify" "$p" || fail "prompt lacks the review instructions"
+  grep -q "docs/design.md" "$p" || fail "prompt lacks the target list"
+  grep -q "README.md" "$p" || fail "prompt lacks the target list"
+  grep -q "Check the numbered steps." "$p" || fail "prompt lacks the brief"
+  assert_eq "$(git status --porcelain)" "" repo-untouched
+  assert_no_leftovers
+}
+
+test_reviewtarget_default_brief_and_head_only() {
+  target_repo
+  export FAKE_AGY_LOG="$T/agy.log" FAKE_AGY_PROMPT_OUT="$T/prompt.out"
+  echo "uncommitted edit" >> README.md
+  FAKE_AGY_MODE=review sub review --target README.md
+  assert_rc 0 || return 1
+  grep -q "inconsistencies" "$T/prompt.out" || fail "no default brief in the prompt"
+  [[ "$(sed -n 's/^README=//p' "$T/agy.log" | tail -n 1)" != *uncommitted* ]] || fail "the reviewer saw an uncommitted edit"
+  assert_eq "$(jq -r '.brief|tostring' "$(review_dir_of)/review.meta.json")" null brief-null
+}
+
+test_reviewtarget_s1_exits_2() {
+  target_repo
+  FAKE_AGY_MODE=review_s1 sub review --target README.md
+  assert_rc 2 || return 1
+  assert_eq "$(jget '[.verdict,.s1] | join(",")')" reject,1 s1
+  [[ -s "$(review_dir_of)/review.json" ]] || fail "an S1 review must still be stored"
+}
+
+test_reviewtarget_tamper_detected() {
+  target_repo
+  FAKE_AGY_MODE=review_write sub review --target README.md
+  assert_rc 4 || return 1
+  assert_match "$(jget .error)" 'reviewer modified files' error
+  local d
+  d="$SUBCON_STATE/reviews/$(jget .id)"
+  [[ ! -e "$d/review.json" ]] || fail "a tampered review must not be stored as a result"
+  assert_match "$(jq -r .error "$d/review.meta.json")" 'reviewer modified files' meta.error
+  ! grep -q '"type":"review"' "$SUBCON_STATE/history.jsonl" 2>/dev/null || fail "a failed review must not reach the history"
+  assert_eq "$(git status --porcelain)" "" repo-untouched
+  assert_no_leftovers
+}
+
+test_reviewtarget_invalid_targets() {
+  target_repo
+  echo untracked > new.md
+  mkdir -p sub && echo x > sub/a.md && commit_all "sub"
+  local bad
+  for bad in /etc/passwd ../x ./README.md sub/../README.md '*.md' 'READ?E.md' 'README[1].md' nope.md docs new.md; do
+    sub review --target "$bad"
+    assert_rc 1 || return 1
+    [[ -n "$(head -c 1 "$T/err")" ]] || fail "no message for target: $bad"
+  done
+  [[ ! -d "$SUBCON_STATE/reviews" ]] || fail "an invalid target left a review directory"
+  [[ ! -d "$SUBCON_STATE/jobs" || "$(jobcount)" == 0 ]] || fail "jobs created"
+  assert_no_leftovers
+}
+
+test_reviewtarget_bad_arguments() {
+  target_repo
+  sub review --target
+  assert_rc 1 || return 1
+  sub review --brief "$T/brief.md"
+  assert_rc 1 || return 1
+  grep -q "target" "$T/err" || fail "stderr: $(cat "$T/err")"
+  sub review --target README.md --brief "$T/missing.md"
+  assert_rc 1 || return 1
+  sub review --target README.md --brief
+  assert_rc 1 || return 1
+  sub review --target README.md some-job-id
+  assert_rc 1 || return 1
+  sub review
+  assert_rc 1 || return 1
+}
+
+test_reviewtarget_claude_driver() {
+  target_repo
+  PATH="$(fake_claude_path):$PATH" FAKE_CLAUDE_MODE=review sub review --driver claude --target README.md
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r '[.driver,.model] | join("|")' "$(review_dir_of)/review.meta.json")" "claude|claude-haiku-5-5" meta
+}
+
+test_reviews_empty() {
+  sub reviews
+  assert_rc 0 || return 1
+  assert_eq "$(jq -c . <<<"$OUT")" '[]' empty
+}
+
+test_reviews_lists_job_and_target_reviews() {
+  target_repo
+  finished_job || return 1
+  local jid="$ID"
+  FAKE_AGY_MODE=review sub review "$jid"
+  assert_rc 0 || return 1
+  sleep 1.1
+  FAKE_AGY_MODE=review_write sub review "$jid"
+  assert_rc 4 || return 1
+  sleep 1.1
+  FAKE_AGY_MODE=review_s1 sub review --target README.md
+  assert_rc 2 || return 1
+  local tid
+  tid="$(jget .id)"
+  sub reviews
+  assert_rc 0 || return 1
+  assert_eq "$(jget length)" 3 count
+  assert_eq "$(jget '[.[].id] | join(",")')" "$tid,$jid-r2,$jid-r1" newest-first
+  assert_eq "$(jget '.[0] | [.target_type,(.job_id|tostring),.verdict,.s1,.s2,.s3,.driver,.model] | join("|")')" \
+    "target|null|reject|1|0|0|agy|gemini-4-hydrogen-high" target-entry
+  assert_eq "$(jget '.[0].path')" "$SUBCON_STATE/reviews/$tid/review.json" target-path
+  assert_eq "$(jget '.[1] | [(.verdict|tostring),(.path|tostring),(.error != null)] | join("|")')" "null|null|true" failed-entry
+  assert_eq "$(jget '.[2] | [.job_id,.verdict,.s2,.path] | join("|")')" "$jid|changes|1|$(jobdir "$jid")/review-1.json" job-entry
+  [[ -n "$(jget '.[0].created_at')" ]] || fail "no created_at"
+  # a job filter keeps only that job's reviews
+  sub reviews "$jid"
+  assert_rc 0 || return 1
+  assert_eq "$(jget '[.[].id] | join(",")')" "$jid-r2,$jid-r1" job-filter
+  sub reviews nope
+  assert_rc 1 || return 1
+  grep -q "unknown job id" "$T/err" || fail "stderr: $(cat "$T/err")"
+  sub reviews a b
+  assert_rc 1 || return 1
+  sub reviews --all
+  assert_rc 1 || return 1
+}
+
+test_reviews_other_repo_excluded() {
+  target_repo
+  FAKE_AGY_MODE=review sub review --target README.md
+  assert_rc 0 || return 1
+  local other="$T/other"
+  git init -q "$other"
+  OUT="$(cd "$other" && "$SUBCON" reviews 2>"$T/err")" && RC=0 || RC=$?
+  assert_rc 0 || return 1
+  assert_eq "$(jq -c . <<<"$OUT")" '[]' other-repo-empty
+}
+
+# ---- review trailer in subcon commit (ticket 62) ----------------------------
+
+# commit_with_review <verdict> [<severity>...]: a finished, applied job with review-1.json; commits it.
+# The review's meta names agy / gemini-4-hydrogen-high unless RV_DRIVER / RV_MODEL say otherwise.
+commit_with_review() {
+  finished_job || return 1
+  sub apply "$ID"
+  assert_rc 0 || return 1
+  local d
+  d="$(jobdir "$ID")"
+  review_json "$d/review-${RV_N:-1}.json" "$@"
+  jq -n --arg d "${RV_DRIVER:-agy}" --arg m "${RV_MODEL:-gemini-4-hydrogen-high}" \
+    '{v:1,id:"x",job_id:"x",target_type:"job",repo:"r",created_at:"2026-11-15T12:00:00Z",driver:$d,model:$m,error:null}' \
+    > "$d/review-${RV_N:-1}.meta.json"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  MSG="$(git log -1 --format=%B)"
+}
+
+reviewer_lines() { grep -c '^Reviewed-By:' <<<"$MSG" || true; }
+
+test_reviewcommit_adds_the_reviewer() {
+  commit_with_review approve || return 1
+  grep -Fxq "Reviewed-By: $REVIEWER" <<<"$MSG" || fail "supervisor trailer missing: $MSG"
+  grep -Fxq "Reviewed-By: Gemini 4 Hydrogen <noreply@google.com>" <<<"$MSG" || fail "reviewer trailer missing: $MSG"
+  grep -Fxq "Co-Authored-By: Gemini 4 Hydrogen <noreply@google.com>" <<<"$MSG" || fail "implementer trailer missing: $MSG"
+  assert_eq "$(reviewer_lines)" 2 reviewed-by-count
+  [[ ! -s "$T/err" ]] || fail "unexpected stderr for a clean review: $(cat "$T/err")"
+}
+
+test_reviewcommit_changes_with_s1_warns() {
+  commit_with_review changes S1 S2 || return 1
+  grep -Fxq "Reviewed-By: Gemini 4 Hydrogen <noreply@google.com>" <<<"$MSG" || fail "reviewer trailer missing: $MSG"
+  grep -q "S1" "$T/err" || fail "no S1 notice: $(cat "$T/err")"
+  grep -q "review-1" "$T/err" || fail "the notice does not name the review: $(cat "$T/err")"
+}
+
+test_reviewcommit_reject_is_not_an_approval() {
+  commit_with_review reject S1 || return 1
+  assert_eq "$(reviewer_lines)" 1 reviewed-by-count
+  ! grep -q "Hydrogen <" <<<"$(grep '^Reviewed-By' <<<"$MSG")" || fail "a rejecting review got a trailer: $MSG"
+  grep -q "S1" "$T/err" || fail "no S1 notice: $(cat "$T/err")"
+}
+
+test_reviewcommit_latest_is_numeric() {
+  finished_job || return 1
+  sub apply "$ID"
+  local d
+  d="$(jobdir "$ID")"
+  review_json "$d/review-2.json" approve
+  review_json "$d/review-10.json" reject S1
+  jq -n '{v:1,id:"x",job_id:"x",target_type:"job",repo:"r",created_at:"2026-11-15T12:00:00Z",driver:"agy",model:"gemini-4-hydrogen-high",error:null}' > "$d/review-10.meta.json"
+  jq -n '{v:1,id:"x",job_id:"x",target_type:"job",repo:"r",created_at:"2026-11-15T12:00:00Z",driver:"agy",model:"gemini-4-hydrogen-high",error:"boom"}' > "$d/review-11.meta.json"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  MSG="$(git log -1 --format=%B)"
+  assert_eq "$(reviewer_lines)" 1 only-the-supervisor
+  grep -q "review-10" "$T/err" || fail "the notice should name review-10: $(cat "$T/err")"
+}
+
+test_reviewcommit_no_review_unchanged() {
+  finished_job || return 1
+  sub apply "$ID"
+  SUBCON_REVIEWER="$REVIEWER" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  MSG="$(git log -1 --format=%B)"
+  assert_eq "$(reviewer_lines)" 1 reviewed-by-count
+  [[ ! -s "$T/err" ]] || fail "unexpected stderr: $(cat "$T/err")"
+}
+
+test_reviewcommit_claude_reviewer_name() {
+  RV_DRIVER=claude RV_MODEL=claude-haiku-5-5 commit_with_review changes || return 1
+  grep -Fxq "Reviewed-By: Claude Haiku 5.5 <noreply@anthropic.com>" <<<"$MSG" || fail "reviewer trailer missing: $MSG"
+}
+
+test_reviewcommit_unknown_driver_falls_back_to_the_model_id() {
+  RV_DRIVER=gone RV_MODEL=x-1 commit_with_review approve || return 1
+  grep -Fxq "Reviewed-By: x-1 <noreply@google.com>" <<<"$MSG" || fail "fallback trailer missing: $MSG"
+}
+
+test_reviewcommit_same_name_not_duplicated() {
+  finished_job || return 1
+  sub apply "$ID"
+  local d
+  d="$(jobdir "$ID")"
+  review_json "$d/review-1.json" approve
+  jq -n '{v:1,id:"x",job_id:"x",target_type:"job",repo:"r",created_at:"2026-11-15T12:00:00Z",driver:"agy",model:"gemini-4-hydrogen-high",error:null}' > "$d/review-1.meta.json"
+  SUBCON_REVIEWER="Gemini 4 Hydrogen <noreply@google.com>" sub commit -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  MSG="$(git log -1 --format=%B)"
+  assert_eq "$(reviewer_lines)" 1 no-duplicate
+}
+
+test_reviewcommit_edited_keeps_both() {
+  finished_job || return 1
+  sub apply "$ID"
+  local d
+  d="$(jobdir "$ID")"
+  review_json "$d/review-1.json" approve
+  jq -n '{v:1,id:"x",job_id:"x",target_type:"job",repo:"r",created_at:"2026-11-15T12:00:00Z",driver:"agy",model:"gemini-4-hydrogen-high",error:null}' > "$d/review-1.meta.json"
+  echo more >> README.md
+  SUBCON_REVIEWER="$REVIEWER" sub commit --edited -m "feat: fake change" "$ID"
+  assert_rc 0 || return 1
+  MSG="$(git log -1 --format=%B)"
+  grep -Fxq "Co-Authored-By: $REVIEWER" <<<"$MSG" || fail "edited co-author missing: $MSG"
+  grep -Fxq "Reviewed-By: Gemini 4 Hydrogen <noreply@google.com>" <<<"$MSG" || fail "reviewer trailer missing: $MSG"
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv reviewjob)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review reviewdrv reviewjob reviewtarget reviews reviewcommit)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do

@@ -61,7 +61,7 @@
 | 57 | 認証・規約の注意書きを公式 FAQ の線引きに合わせて正確化 | Haiku | `README.md` `docs/delegation.md` `lib/common.sh` |
 | 58 | レビューの土台（`schema/review.schema.json`、プロンプト、検証・集計・採番、history の `review` 行。設計は ../reviewer.md） | Haiku | `schema/review.schema.json` `lib/review-prompt.md` `lib/review.sh` `lib/history.sh` `bin/subcon` |
 | 59 | ドライバの `SUBCON_ROLE=review`（agy の許可リスト、claude の dontAsk、opencode の拒否）と fake の review 対応 | 上位 | `drivers/agy` `drivers/claude` `drivers/opencode` `tests/` |
-| 60 | `subcon review <job-id>`（複製・一時コミット・事後検査・trap・回収） | 上位 | `lib/review.sh` `bin/subcon` |
+| 60 | `subcon review <job-id>`（複製・一時コミット・事後検査・trap・回収。実装済み 2026-11-15） | 上位 | `lib/review.sh` `bin/subcon` |
 | 61 | `--target` `--brief` と `subcon reviews` | Haiku | `lib/review.sh` `bin/subcon` |
 | 62 | `commit` の `Reviewed-By` 自動付記と S1 の注意 | Haiku | `lib/manage.sh` |
 | 63 | レビュー機能の文書追従 | Haiku | `docs/` `README.md` |
