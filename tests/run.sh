@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run subcon's tests with a fake agy: tests/run.sh [group...]
-# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget (all when none given).
+# Groups: ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review (all when none given).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -2901,10 +2901,147 @@ test_budget_invalid_value() {
   assert_eq "$(jobcount)" 0 jobs
 }
 
+# ---- review (ticket 58) ---------------------------------------------------
+
+# rv <function> [args]: call a lib function in a subshell with every lib sourced.
+rv() {
+  (
+    set -euo pipefail
+    export SUBCON_ROOT="$ROOT"
+    for f in common ticket job query manage history stats export review; do
+      # shellcheck source=/dev/null
+      source "$ROOT/lib/$f.sh"
+    done
+    "$@"
+  )
+}
+
+# review_json <file> <verdict> [<severity>...]: a schema-shaped review with one finding per severity.
+review_json() {
+  local file=$1 verdict=$2
+  shift 2
+  local s findings=""
+  for s in "$@"; do
+    findings+="{\"severity\":\"$s\",\"file\":\"a.sh\",\"line\":3,\"summary\":\"s\",\"failure_scenario\":\"f\",\"fix\":\"x\"},"
+  done
+  printf '{"verdict":"%s","summary":"sum","findings":[%s],"unverified":["u"]}\n' "$verdict" "${findings%,}" > "$file"
+}
+
+test_review_schema_shape() {
+  local s="$ROOT/schema/review.schema.json"
+  jq -e . "$s" >/dev/null || fail "schema is not valid JSON"
+  assert_eq "$(jq -c '.required | sort' "$s")" '["findings","summary","unverified","verdict"]' required
+  assert_eq "$(jq -c '.properties.verdict.enum' "$s")" '["approve","changes","reject"]' verdict
+  assert_eq "$(jq -c '.properties.findings.items.properties.severity.enum' "$s")" '["S1","S2","S3"]' severity
+  assert_eq "$(jq -c '.properties.findings.items.required | sort' "$s")" '["failure_scenario","file","fix","line","severity","summary"]' finding-required
+  assert_eq "$(jq -r '.additionalProperties' "$s")" false additionalProperties
+}
+
+test_review_prompt_file() {
+  local p="$ROOT/lib/review-prompt.md"
+  [[ -s "$p" ]] || fail "lib/review-prompt.md missing"
+  local w
+  for w in S1 S2 S3 unverified "Do not modify"; do
+    grep -q "$w" "$p" || fail "prompt lacks: $w"
+  done
+}
+
+test_review_sourced_by_cli() {
+  grep -Eq 'for f in .*history.* export review' "$ROOT/bin/subcon" || fail "bin/subcon does not source lib/review.sh"
+  sub trailer
+  assert_rc 0 || return 1
+}
+
+test_review_validate_ok() {
+  review_json "$T/r.json" changes S2 S3
+  rv review_validate "$T/r.json" 2>"$T/err" || fail "rejected a valid review: $(cat "$T/err")"
+  review_json "$T/r.json" approve
+  rv review_validate "$T/r.json" 2>"$T/err" || fail "rejected an empty approve: $(cat "$T/err")"
+  review_json "$T/r.json" reject S1 S2
+  rv review_validate "$T/r.json" 2>"$T/err" || fail "rejected S1 with reject: $(cat "$T/err")"
+}
+
+test_review_validate_inconsistent() {
+  review_json "$T/ok.json" changes S2
+  rv review_validate "$T/ok.json" 2>"$T/err" || fail "baseline review rejected: $(cat "$T/err")"
+  review_json "$T/r.json" changes
+  rv review_validate "$T/r.json" 2>"$T/err" && fail "empty findings with changes accepted"
+  grep -q "inconsistent verdict" "$T/err" || fail "stderr: $(cat "$T/err")"
+  review_json "$T/r.json" approve S1
+  rv review_validate "$T/r.json" 2>"$T/err" && fail "S1 with approve accepted"
+  grep -q "inconsistent verdict" "$T/err" || fail "stderr: $(cat "$T/err")"
+  return 0
+}
+
+test_review_validate_malformed() {
+  review_json "$T/r.json" changes S2
+  rv review_validate "$T/r.json" 2>"$T/err" || fail "baseline review rejected: $(cat "$T/err")"
+  jq '.findings[0].severity = "S9"' "$T/r.json" > "$T/b.json"
+  rv review_validate "$T/b.json" 2>/dev/null && fail "unknown severity accepted"
+  jq 'del(.unverified)' "$T/r.json" > "$T/b.json"
+  rv review_validate "$T/b.json" 2>/dev/null && fail "missing unverified accepted"
+  jq '.findings[0].line = -1' "$T/r.json" > "$T/b.json"
+  rv review_validate "$T/b.json" 2>/dev/null && fail "negative line accepted"
+  jq '.extra = 1' "$T/r.json" > "$T/b.json"
+  rv review_validate "$T/b.json" 2>/dev/null && fail "extra property accepted"
+  echo 'not json' > "$T/b.json"
+  rv review_validate "$T/b.json" 2>/dev/null && fail "non-JSON accepted"
+  rv review_validate "$T/missing.json" 2>/dev/null && fail "missing file accepted"
+  return 0
+}
+
+test_review_counts() {
+  review_json "$T/r.json" reject S1 S1 S2 S3 S3 S3
+  assert_eq "$(rv review_counts "$T/r.json")" '{"s1":2,"s2":1,"s3":3}' counts
+  review_json "$T/r.json" approve
+  assert_eq "$(rv review_counts "$T/r.json")" '{"s1":0,"s2":0,"s3":0}' empty
+}
+
+test_review_next_n() {
+  mkdir -p "$T/d"
+  assert_eq "$(rv review_next_n "$T/d")" 1 empty
+  touch "$T/d/review-1.meta.json" "$T/d/review-2.meta.json" "$T/d/review-10.meta.json"
+  assert_eq "$(rv review_next_n "$T/d")" 11 numeric-max
+}
+
+test_review_latest() {
+  mkdir -p "$T/d"
+  rv review_latest "$T/d" >/dev/null 2>&1 && fail "latest of an empty dir succeeded"
+  touch "$T/d/review-2.json" "$T/d/review-10.json" "$T/d/review-11.meta.json"
+  assert_eq "$(rv review_latest "$T/d")" "$T/d/review-10.json" numeric-latest-with-result
+}
+
+test_review_history_line() {
+  review_json "$T/r.json" changes S1 S2 S2
+  jq -n '{v:1,id:"20261115-120000-t-ab12-r1",job_id:"20261115-120000-t-ab12",target_type:"job",repo:"/r",
+    created_at:"2026-11-15T12:00:00Z",driver:"agy",model:"gemini-4-hydrogen-high",duration_seconds:12.5,
+    cost_usd:null,usage:{input_tokens:10,output_tokens:5,total_tokens:15,cache_read_tokens:2,thinking_tokens:1}}' > "$T/m.json"
+  rv history_append_review "$T/m.json" "$T/r.json" || fail "history_append_review failed"
+  local line
+  line="$(tail -n 1 "$SUBCON_STATE/history.jsonl")"
+  assert_eq "$(jq -r '[.v,.type,.id,.target_type,.job_id,.repo,.driver,.model,.verdict,.s1,.s2,.s3,.duration_s,.cost_usd,.tokens.total] | map(tostring) | join("|")' <<<"$line")" \
+    '1|review|20261115-120000-t-ab12-r1|job|20261115-120000-t-ab12|/r|agy|gemini-4-hydrogen-high|changes|1|2|0|12.5|null|15' fields
+  assert_eq "$(jq -r '.created_at' <<<"$line")" 2026-11-15T12:00:00Z created_at
+}
+
+test_review_history_target_and_stats() {
+  review_json "$T/r.json" approve
+  jq -n '{v:1,id:"rv-1",target_type:"target",repo:"/r",created_at:"2026-11-15T12:00:00Z",driver:"claude",
+    model:"claude-haiku-5-5",duration_seconds:null,cost_usd:0.01,usage:null}' > "$T/m.json"
+  rv history_append_review "$T/m.json" "$T/r.json" || fail "history_append_review failed"
+  local line
+  line="$(tail -n 1 "$SUBCON_STATE/history.jsonl")"
+  assert_eq "$(jq -r '[.target_type,(.job_id|tostring),(.tokens|tostring),(.cost_usd|tostring)] | join("|")' <<<"$line")" 'target|null|null|0.01' nulls
+  # review lines must not disturb the job statistics
+  sub stats --all
+  assert_rc 0 || return 1
+  jq -e . <<<"$OUT" >/dev/null || fail "stats output is not JSON after a review line"
+}
+
 # ---- runner --------------------------------------------------------------
 
 groups=("$@")
-[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget)
+[[ ${#groups[@]} -gt 0 ]] || groups=(ticket submit query manage commit checks reject formats runnerenv entry guard logcmd history stats export resume preflight authwarn container containerpre cijob cirunner cipre driver budget review)
 
 pass=0 failed=()
 for g in "${groups[@]}"; do
