@@ -379,7 +379,7 @@ cmd_review() {
     case "$1" in
       --driver) [[ $# -ge 2 ]] || die "--driver requires a value"; driver="$2"; shift 2 ;;
       --model) [[ $# -ge 2 ]] || die "--model requires a value"; model="$2"; shift 2 ;;
-      --timeout) [[ $# -ge 2 ]] || die "--timeout requires a value"; timeout="$2"; shift 2 ;;
+      --timeout) [[ $# -ge 2 ]] || die "--timeout requires a value"; require_timeout "$2"; timeout="$2"; shift 2 ;;
       --target) [[ $# -ge 2 ]] || die "--target requires a value"; targets+=("$2"); shift 2 ;;
       --brief) [[ $# -ge 2 ]] || die "--brief requires a value"; brief="$2"; brief_given=1; shift 2 ;;
       -*) die "unknown option: $1" ;;

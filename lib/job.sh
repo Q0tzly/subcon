@@ -28,6 +28,7 @@ cmd_submit() {
         ;;
       --timeout)
         [[ $# -ge 2 ]] || die "--timeout requires a value"
+        require_timeout "$2"
         timeout="$2"
         shift 2
         ;;
@@ -305,6 +306,7 @@ cmd_resume() {
     case "$1" in
       --timeout)
         [[ $# -ge 2 ]] || die "--timeout requires a value"
+        require_timeout "$2"
         timeout="$2"
         shift 2
         ;;

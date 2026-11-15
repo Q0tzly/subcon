@@ -307,6 +307,14 @@ test_submit_driver_meta() {
   assert_eq "$(result "$ID" .status)" done status
 }
 
+test_submit_timeout_needs_unit() {
+  sub submit --timeout 900 docs/t/01-a.md
+  assert_rc 1 || return 1
+  assert_match "$(cat "$T/err")" unit "stderr explains the unit"
+  sub submit --timeout 5x docs/t/01-a.md
+  assert_rc 1 || return 1
+}
+
 test_submit_runner_args() {
   export FAKE_AGY_LOG="$T/agy.log"
   submit_one --model gemini-3.8-flash-high --timeout 5m docs/t/01-a.md || return 1
@@ -3379,6 +3387,16 @@ test_reviewjob_bad_options() {
   sub review "$ID" "$ID"
   assert_rc 1 || return 1
   sub review --timeout
+  assert_rc 1 || return 1
+}
+
+test_reviewjob_timeout_needs_unit() {
+  finished_job || return 1
+  sub review --timeout 900 "$ID"
+  assert_rc 1 || return 1
+  sub review --timeout 900 --target docs/t/01-a.md
+  assert_rc 1 || return 1
+  sub review --timeout 900s --bogus "$ID"
   assert_rc 1 || return 1
 }
 

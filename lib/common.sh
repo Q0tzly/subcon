@@ -17,6 +17,11 @@ SUBCON_PROMPT_PREAMBLE="$SUBCON_ROOT/lib/prompt.md"
 SUBCON_RESUME_PROMPT="$SUBCON_ROOT/lib/resume-prompt.md"
 
 die() { echo "subcon: $*" >&2; exit 1; }
+
+# Drivers pass the timeout to agy as a Go duration, which rejects a bare number ("900").
+require_timeout() {
+  [[ "$1" =~ ^[0-9]+[smh]$ ]] || die "invalid --timeout '$1': use a number with a unit (e.g. 900s, 30m, 2h)"
+}
 log() { echo "==> $*" >&2; }
 
 # json_out <jq-filter> [jq args...]: print one compact JSON value built with `jq -n`.
