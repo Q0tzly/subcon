@@ -67,7 +67,8 @@ subcon reviews [<job-id>]
   `plan` には頼らない。上の許可リストだけで設計 doc のレビューが完走し、親リポジトリは変わらなかった。
 - **claude**: `--permission-mode dontAsk --allowedTools "Read,Grep,Glob"`（Edit・Write・Bash を与えない）。
   `SUBCON_CLAUDE_MCP_CONFIG` と `SUBCON_CONVERSATION` は review では無視し、MCP は空に固定する。
-  `--json-schema` と併用して完走するかは、票 59 の着工前に実機で確かめる。
+  実機の確認（2026-11-15、claude-haiku-5-5）: `--json-schema` と併用して完走し、`structured_output` が返った。
+  Write と Bash の試行は `permission_denials` に記録されて拒否され、ファイルは作られなかった。
 - テストの再実行はしない（検収と同じく上位の仕事）。
 - **opencode**: v1 は未対応。`SUBCON_ROLE=review` ならエラーにする。
 
