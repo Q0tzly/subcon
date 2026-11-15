@@ -64,7 +64,7 @@
 | 60 | `subcon review <job-id>`（複製・一時コミット・事後検査・trap・回収。実装済み 2026-11-15） | 上位 | `lib/review.sh` `bin/subcon` |
 | 61 | `--target` `--brief` と `subcon reviews` | Haiku | `lib/review.sh` `bin/subcon` |
 | 62 | `commit` の `Reviewed-By` 自動付記と S1 の注意 | Haiku | `lib/manage.sh` |
-| 63 | レビュー機能の文書追従 | Haiku | `docs/` `README.md` |
+| 63 | レビュー機能の文書追従（票58〜62・硬化の修正の後） | Haiku | `docs/` `README.md` |
 
 - 01・02 は合格条件と土台を決める作業なので上位がやる。`bin/subcon` は 02 で全サブコマンド分を作り、以降の票では触らない
 - 03〜06 は触るファイルが重ならない。04 は 03 の `ticket_validate` を、05・06 は 04 のジョブディレクトリを前提にするので、v1（同期実行）では番号順に流す
