@@ -20,9 +20,10 @@ case "${1:-}" in
       echo "devin not found: install the Devin CLI and make sure it is on PATH or at ~/.local/bin/devin" >&2
       exit 1
     fi
-    # `devin auth status` exits 0 either way; the text carries the state.
-    # The IDE env is already stripped above, so this checks credentials.toml.
-    if devin auth status 2>/dev/null | grep -qi "not logged in"; then
+    # `devin auth status` exits 0 either way and its text does not reflect
+    # credentials.toml validity (it can print "not logged in" while the API
+    # key works), so probe the API directly instead.
+    if ! devin list --format json >/dev/null 2>&1; then
       echo "devin is not signed in: run devin auth login" >&2
       exit 1
     fi
