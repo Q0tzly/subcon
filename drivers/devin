@@ -1,0 +1,138 @@
+#!/bin/bash
+# devin driver: runs the job's prompt with the Devin CLI (devin -p) in the current
+# directory (the job's work/ or a review clone).
+# Usage: drivers/devin <job-dir>. The caller (a runner or the reviewer) has already cd'd into work/.
+set -euo pipefail
+
+if ! command -v devin >/dev/null 2>&1 && [[ -n "${HOME:-}" && -x "$HOME/.local/bin/devin" ]]; then
+  export PATH="$HOME/.local/bin${PATH:+:$PATH}"
+fi
+
+case "${1:-}" in
+  preflight)
+    if ! command -v devin >/dev/null 2>&1; then
+      echo "devin not found: install the Devin CLI and make sure it is on PATH or at ~/.local/bin/devin" >&2
+      exit 1
+    fi
+    # `devin auth status` exits 0 either way; the text carries the state.
+    if devin auth status 2>/dev/null | grep -qi "not logged in"; then
+      echo "devin is not signed in: run devin auth login" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  models)
+    printf '%s\t%s\n' \
+      "claude-haiku-5-5" "Claude Haiku 5.5" \
+      "claude-sonnet-4" "Claude Sonnet" \
+      "claude-opus-4.6" "Claude Opus"
+    exit 0
+    ;;
+  default-model)
+    echo "${SUBCON_DEVIN_DEFAULT_MODEL:-claude-haiku-5-5}"
+    exit 0
+    ;;
+esac
+
+# implement (default): edit the working directory. review: read only (auto mode
+# auto-approves read-only tools; a write tool would have to prompt, which cannot
+# happen with -p and stdin closed, so it is denied or dies at the timeout).
+role="${SUBCON_ROLE:-implement}"
+case "$role" in
+  implement|review) ;;
+  *) echo "drivers/devin: unknown role: $role" >&2; exit 1 ;;
+esac
+
+job_dir="${1:?job directory required}"
+[[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
+
+# Step 1: append the report instruction to the prompt (devin has no --output-schema).
+prompt_file="$job_dir/prompt.driver.txt"
+{
+  cat "$SUBCON_PROMPT_FILE"
+  printf '\n\n## Final report\n\n'
+  echo 'Your final message must be a single JSON object that conforms to the JSON Schema below. Output only that JSON object: no sentences and no code fence before or after it.'
+  echo
+  cat "$SUBCON_SCHEMA"
+  echo
+} > "$prompt_file"
+prompt="$(cat "$prompt_file")"
+
+stream="$job_dir/agy.stream"
+log="$job_dir/log"
+: > "$stream"
+
+timeout_cmd=()
+if [[ -n "${SUBCON_TIMEOUT:-}" ]]; then
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=(timeout "$SUBCON_TIMEOUT")
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd=(gtimeout "$SUBCON_TIMEOUT")
+  fi
+fi
+
+# Session discovery: `devin list` is per-directory, so diffing the id list
+# around the run names the session this run created (best effort for resume).
+sessions_before="$(devin list --format json 2>/dev/null | jq -r '.[].id' 2>/dev/null | sort || true)"
+
+perm_mode=dangerous
+[[ "$role" == review ]] && perm_mode=auto
+
+resume_args=()
+if [[ "$role" != review && -n "${SUBCON_CONVERSATION:-}" ]]; then
+  resume_args=(-r "$SUBCON_CONVERSATION")
+fi
+
+# Step 2: run devin. -p prints the agent's reply to stdout and exits;
+# --respect-workspace-trust false skips the trust prompt in the throwaway clone.
+devin_rc=0
+${timeout_cmd[@]+"${timeout_cmd[@]}"} devin -p "$prompt" \
+  --model "$SUBCON_JOB_MODEL" \
+  --permission-mode "$perm_mode" \
+  --respect-workspace-trust false \
+  ${resume_args[@]+"${resume_args[@]}"} \
+  < /dev/null > "$stream" 2>> "$log" || devin_rc=$?
+
+# Step 3: conversation id is the session that appeared during this run.
+conversation="$(comm -13 \
+  <(printf '%s\n' "$sessions_before") \
+  <(devin list --format json 2>/dev/null | jq -r '.[].id' 2>/dev/null | sort) \
+  | head -n 1 || true)"
+
+# Step 4: the report is the last JSON object in the reply text.
+final_text="$(cat "$stream" 2>/dev/null || true)"
+
+jq -cn \
+  --arg t "$final_text" \
+  --arg sid "$conversation" \
+  --argjson rc "$devin_rc" \
+  --arg role "$role" '
+  def obj: fromjson? | select(type == "object");
+  def valid:
+    (type == "object")
+    and (
+      if $role == "review" then
+        (((["verdict", "summary", "findings", "unverified"]) - keys) == [])
+        and (.verdict == "approve" or .verdict == "changes" or .verdict == "reject")
+      else
+        (((["status", "summary", "files_changed", "commands_run", "design_questions", "issues_found"]) - keys) == [])
+        and (.status == "done" or .status == "partial" or .status == "blocked")
+      end
+    );
+  (first(
+     ($t | obj),
+     ($t | capture("```json\\s*(?<j>[\\s\\S]*?)```")? | .j | obj),
+     ($t | capture("(?<j>\\{[\\s\\S]*\\})")? | .j | obj)
+   ) // null) as $found
+  | (if $found != null and ($found | valid) then $found else null end) as $report
+  | (if $sid == "" then {} else {conversation_id: $sid} end) as $conv
+  | if $rc == 0 then
+      {status: "SUCCESS"} + $conv
+      + (if $report == null then {} else {structured_output: $report} end)
+    else
+      {status: "ERROR"} + $conv + {error: "devin exited without a result"}
+    end
+' > "$job_dir/agy.json"
+
+# Step 5: exit code follows the devin process; a missing report is not an error here.
+[[ "$devin_rc" -eq 0 ]]
