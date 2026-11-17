@@ -1,0 +1,149 @@
+#!/bin/bash
+# codex driver: runs the job's prompt with Codex CLI (codex exec) in the current directory
+# (the job's work/ or a review clone).
+# Usage: drivers/codex <job-dir>. The caller (a runner or the reviewer) has already cd'd into work/.
+set -euo pipefail
+
+if ! command -v codex >/dev/null 2>&1 && [[ -n "${HOME:-}" && -x "$HOME/.local/bin/codex" ]]; then
+  export PATH="$HOME/.local/bin${PATH:+:$PATH}"
+fi
+
+case "${1:-}" in
+  preflight)
+    if ! command -v codex >/dev/null 2>&1; then
+      echo "codex not found: install Codex CLI and make sure it is on PATH or at ~/.local/bin/codex" >&2
+      exit 1
+    fi
+    if ! codex login status >/dev/null 2>&1; then
+      echo "codex is not signed in: run codex login" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  models)
+    printf '%s\t%s\n' \
+      "gpt-6-luna" "GPT-6 Luna" \
+      "gpt-5.6-sol" "GPT-5.6 Sol"
+    exit 0
+    ;;
+  default-model)
+    echo "${SUBCON_CODEX_DEFAULT_MODEL:-gpt-6-luna}"
+    exit 0
+    ;;
+esac
+
+role="${SUBCON_ROLE:-implement}"
+case "$role" in
+  implement|review) ;;
+  *) echo "drivers/codex: unknown role: ${SUBCON_ROLE}" >&2; exit 1 ;;
+esac
+
+job_dir="${1:?job directory required}"
+[[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
+
+# Step 1: append the report instruction to the prompt. The augmented copy is kept in the job directory.
+prompt_file="$job_dir/prompt.driver.txt"
+{
+  cat "$SUBCON_PROMPT_FILE"
+  printf '\n\n## Final report\n\n'
+  echo 'Your final message must be a single JSON object that conforms to the JSON Schema below. Output only that JSON object: no sentences and no code fence before or after it.'
+  echo
+  cat "$SUBCON_SCHEMA"
+  echo
+} > "$prompt_file"
+prompt="$(cat "$prompt_file")"
+
+stream="$job_dir/agy.stream"
+last_msg="$job_dir/last-message.txt"
+log="$job_dir/log"
+: > "$stream"
+
+timeout_cmd=()
+if [[ -n "${SUBCON_TIMEOUT:-}" ]]; then
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=(timeout "$SUBCON_TIMEOUT")
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd=(gtimeout "$SUBCON_TIMEOUT")
+  fi
+fi
+
+# Mode selection. A review gets a read-only sandbox and no persisted session; an implement
+# job runs with the same permissions the other drivers grant (the worktree is throwaway).
+# User config and execpolicy rules are ignored so runs are deterministic.
+exec_cmd=(exec)
+mode_args=()
+if [[ "$role" == review ]]; then
+  mode_args=(-s read-only --ephemeral)
+else
+  mode_args=(--dangerously-bypass-approvals-and-sandbox)
+  [[ -z "${SUBCON_CONVERSATION:-}" ]] || exec_cmd=(exec resume "$SUBCON_CONVERSATION")
+fi
+
+# Step 2: run codex. --output-schema constrains the final message; -o keeps a copy of it.
+codex_rc=0
+${timeout_cmd[@]+"${timeout_cmd[@]}"} codex "${exec_cmd[@]}" --json \
+  -m "$SUBCON_JOB_MODEL" \
+  --output-schema "$SUBCON_SCHEMA" \
+  -o "$last_msg" \
+  ${mode_args[@]+"${mode_args[@]}"} \
+  --ignore-user-config --ignore-rules \
+  -- "$prompt" \
+  < /dev/null > "$stream" 2>> "$log" || codex_rc=$?
+
+# Step 3: conversation ID (thread id) from the thread.started event.
+conversation="$(jq -R -r 'fromjson? | select(.type == "thread.started") | .thread_id // empty' "$stream" 2>/dev/null | head -n 1)"
+
+# Step 4: token usage from the turn.completed events (summed over turns).
+usage="$(jq -R -n -c '
+  [inputs | fromjson? | select(.type == "turn.completed") | .usage // empty] as $u
+  | {
+      input_tokens: ([$u[] | (.input_tokens // 0)] | add // 0),
+      output_tokens: ([$u[] | (.output_tokens // 0)] | add // 0),
+      total_tokens: ([$u[] | ((.input_tokens // 0) + (.output_tokens // 0))] | add // 0),
+      thinking_tokens: ([$u[] | (.reasoning_output_tokens // 0)] | add // 0),
+      cache_read_tokens: ([$u[] | (.cached_input_tokens // 0)] | add // 0)
+    }
+' "$stream")"
+
+# Step 5: the report is the last agent message. Prefer the -o file, then the last
+# item.completed agent_message text, then a ```json fence / brace-span extraction.
+final_text="$(cat "$last_msg" 2>/dev/null || true)"
+if [[ -z "$final_text" ]]; then
+  final_text="$(jq -R -n -r '[inputs | fromjson? | select(.type == "item.completed") | .item | select(.type == "agent_message") | .text] | .[-1] // empty' "$stream" 2>/dev/null || true)"
+fi
+
+jq -cn \
+  --arg t "$final_text" \
+  --arg sid "$conversation" \
+  --argjson usage "$usage" \
+  --argjson rc "$codex_rc" \
+  --arg role "$role" '
+  def obj: fromjson? | select(type == "object");
+  def valid:
+    (type == "object")
+    and (
+      if $role == "review" then
+        (((["verdict", "summary", "findings", "unverified"]) - keys) == [])
+        and (.verdict == "approve" or .verdict == "changes" or .verdict == "reject")
+      else
+        (((["status", "summary", "files_changed", "commands_run", "design_questions", "issues_found"]) - keys) == [])
+        and (.status == "done" or .status == "partial" or .status == "blocked")
+      end
+    );
+  (first(
+     ($t | obj),
+     ($t | capture("```json\\s*(?<j>[\\s\\S]*?)```")? | .j | obj),
+     ($t | capture("(?<j>\\{[\\s\\S]*\\})")? | .j | obj)
+   ) // null) as $found
+  | (if $found != null and ($found | valid) then $found else null end) as $report
+  | (if $sid == "" then {} else {conversation_id: $sid} end) as $conv
+  | if $rc == 0 then
+      {status: "SUCCESS"} + $conv + {usage: $usage}
+      + (if $report == null then {} else {structured_output: $report} end)
+    else
+      {status: "ERROR"} + $conv + {error: "codex exited without a result"}
+    end
+' > "$job_dir/agy.json"
+
+# Step 6: exit code follows the codex process; a missing report is not an error here.
+[[ "$codex_rc" -eq 0 ]]
