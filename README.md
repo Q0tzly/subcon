@@ -45,7 +45,7 @@ subcon trailer                     # コミット用の Co-Authored-By 行
 - `claude`: Claude Code（既定モデル `claude-haiku-5-5`）。
 - `opencode`: OpenCode CLI（`opencode` が PATH に必要）。モデルは `provider/model` 形式で任意に指定できる（既定は `sakura/preview/Kimi-K2.7-Code`、環境変数 `SUBCON_OPENCODE_DEFAULT_MODEL` で変更可）。プロバイダ設定（opencode.json）は利用者側で用意する。
 - `codex`: Codex CLI（`codex exec`、既定モデル `gpt-6-luna`、環境変数 `SUBCON_CODEX_DEFAULT_MODEL` で変更可）。review は `-s read-only` で動く。
-- `devin`: Devin CLI（`devin -p`、既定モデル `claude-haiku-5-5`、環境変数 `SUBCON_DEVIN_DEFAULT_MODEL` で変更可）。実装役は `--permission-mode dangerous`、レビュー役は `auto`（読み取り専用ツールのみ自動承認）で動く。
+- `devin`: Devin CLI（`devin -p`、既定モデル `swe-2-flash`、環境変数 `SUBCON_DEVIN_DEFAULT_MODEL` で変更可）。実装役は `--permission-mode dangerous`、レビュー役は `auto`（読み取り専用ツールのみ自動承認）で動く。ログインは `devin auth login` の「Paste a token manually」→ `app.devin.ai` のコード貼り付けで行う（ブラウザログインは Windsurf 側の資格情報を発行し、`devin -p` では使えない）。IDE のセッション環境変数（`ACP_BACKEND` など）はドライバが落とす。
 - `container` / `ci` ランナーは `agy` と `claude` ドライバに対応（`container` + `claude` は `ANTHROPIC_API_KEY`、`ci` + `claude` はランナーマシン側の setup-token または API キーが必要）。
 - `resume` は元ジョブのドライバで固定される。
 

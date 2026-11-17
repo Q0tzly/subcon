@@ -8,6 +8,12 @@ if ! command -v devin >/dev/null 2>&1 && [[ -n "${HOME:-}" && -x "$HOME/.local/b
   export PATH="$HOME/.local/bin${PATH:+:$PATH}"
 fi
 
+# When devin is spawned from inside a Devin agent session it inherits
+# ACP_BACKEND, which makes every subcommand take the ACP path that
+# intentionally ignores the local credentials.toml ("Not logged in").
+# Strip the IDE's session env so the CLI uses the stored credentials.
+unset ACP_BACKEND DEVIN_FD_PATH AI_AGENT 2>/dev/null || true
+
 case "${1:-}" in
   preflight)
     if ! command -v devin >/dev/null 2>&1; then
@@ -15,6 +21,7 @@ case "${1:-}" in
       exit 1
     fi
     # `devin auth status` exits 0 either way; the text carries the state.
+    # The IDE env is already stripped above, so this checks credentials.toml.
     if devin auth status 2>/dev/null | grep -qi "not logged in"; then
       echo "devin is not signed in: run devin auth login" >&2
       exit 1
@@ -23,13 +30,16 @@ case "${1:-}" in
     ;;
   models)
     printf '%s\t%s\n' \
-      "claude-haiku-5-5" "Claude Haiku 5.5" \
-      "claude-sonnet-4" "Claude Sonnet" \
-      "claude-opus-4.6" "Claude Opus"
+      "swe-2-flash" "SWE-2 Flash" \
+      "swe-2" "SWE-2" \
+      "claude-haiku-5.5" "Claude Haiku 5.5" \
+      "claude-sonnet-5.5" "Claude Sonnet 5.5" \
+      "claude-opus-5.5" "Claude Opus 5.5" \
+      "gpt-6-luna" "GPT-6 Luna"
     exit 0
     ;;
   default-model)
-    echo "${SUBCON_DEVIN_DEFAULT_MODEL:-claude-haiku-5-5}"
+    echo "${SUBCON_DEVIN_DEFAULT_MODEL:-swe-2-flash}"
     exit 0
     ;;
 esac
@@ -99,7 +109,10 @@ conversation="$(comm -13 \
   <(devin list --format json 2>/dev/null | jq -r '.[].id' 2>/dev/null | sort) \
   | head -n 1 || true)"
 
-# Step 4: the report is the last JSON object in the reply text.
+# Step 4: the report is the last JSON object in the reply text. `devin -p`
+# prints every agent message, so a naive brace span grabs the first `{` in
+# earlier prose. Try every `{`-anchored suffix from the end of the stream
+# backwards and keep the first one that parses to a valid report.
 final_text="$(cat "$stream" 2>/dev/null || true)"
 
 jq -cn \
@@ -119,12 +132,11 @@ jq -cn \
         and (.status == "done" or .status == "partial" or .status == "blocked")
       end
     );
-  (first(
-     ($t | obj),
-     ($t | capture("```json\\s*(?<j>[\\s\\S]*?)```")? | .j | obj),
-     ($t | capture("(?<j>\\{[\\s\\S]*\\})")? | .j | obj)
-   ) // null) as $found
-  | (if $found != null and ($found | valid) then $found else null end) as $report
+  (($t | obj | select(valid)) // null) as $whole
+  | ([$t | match("\\{"; "g") | .offset] | sort | reverse) as $offs
+  | (if $whole != null then $whole
+     else try first($offs[] | ($t[.:] | obj | select(valid))) catch null
+     end) as $report
   | (if $sid == "" then {} else {conversation_id: $sid} end) as $conv
   | if $rc == 0 then
       {status: "SUCCESS"} + $conv
