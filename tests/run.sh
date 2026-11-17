@@ -663,6 +663,42 @@ test_query_runner_died() {
   assert_eq "$(worktrees)" 1 worktrees
 }
 
+test_query_activity_age() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=30
+  submit_one docs/t/01-a.md || return 1
+  wait_state "$ID" running || return 1
+  sub show "$ID"
+  assert_rc 0
+  assert_match "$(jget .activity_age)" '^[0-9]+$' activity_age
+}
+
+test_query_wait_stall_after() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=60
+  submit_one docs/t/01-a.md || return 1
+  local start=$SECONDS
+  sub wait --stall-after 2 --timeout 120 "$ID"
+  assert_rc 0 || return 1
+  (( SECONDS - start < 30 )) || fail "wait ignored --stall-after"
+  assert_match "$(jget '.[0].state')" '^(queued|running)$' state
+  assert_match "$(cat "$T/err")" 'inactive' "stderr note"
+}
+
+test_query_wait_stall_after_fresh() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=30
+  submit_one docs/t/01-a.md || return 1
+  sub wait --stall-after 600 --timeout 2 "$ID"
+  assert_rc 5
+}
+
+test_query_wait_stall_after_invalid() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub wait --stall-after 5x "$ID"
+  assert_rc 1 || return 1
+  sub wait --stall-after abc "$ID"
+  assert_rc 1
+}
+
 # ---- manage (06) ---------------------------------------------------------
 
 # Two finished jobs: A (older) and B.
@@ -780,6 +816,47 @@ test_manage_discard_running() {
   [[ ! -e "$(jobdir "$ID")" ]] || fail "job dir remains"
   ! kill -0 "$pid" 2>/dev/null || fail "runner still alive"
   assert_eq "$(worktrees)" 1 worktrees
+}
+
+test_manage_finish_running() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=60
+  submit_one docs/t/01-a.md || return 1
+  wait_state "$ID" running || return 1
+  local pid
+  pid="$(cat "$(jobdir "$ID")/pid")"
+  sub finish "$ID"
+  assert_rc 4 || return 1
+  assert_eq "$(jget .state)" failed state
+  assert_match "$(jget .error)" 'runner' error
+  assert_eq "$(cat "$(jobdir "$ID")/state")" failed state-file
+  [[ -f "$(jobdir "$ID")/result.json" ]] || fail "no result.json"
+  [[ -f "$(jobdir "$ID")/patch.diff" ]] || fail "no patch.diff"
+  [[ ! -e "$(jobdir "$ID")/work" ]] || fail "work/ not removed"
+  ! kill -0 "$pid" 2>/dev/null || fail "runner still alive"
+  assert_eq "$(worktrees)" 1 worktrees
+}
+
+test_manage_finish_terminal() {
+  submit_one docs/t/01-a.md || return 1
+  wait_done "$ID" || return 1
+  sub finish "$ID"
+  assert_rc 1
+  assert_match "$(cat "$T/err")" 'already finished' err
+}
+
+test_manage_finish_dead_runner() {
+  export FAKE_AGY_MODE=sleep FAKE_AGY_SLEEP=30
+  submit_one docs/t/01-a.md || return 1
+  wait_state "$ID" running || return 1
+  killtree "$(cat "$(jobdir "$ID")/pid")"
+  sub finish "$ID"
+  assert_rc 1
+  assert_eq "$(cat "$(jobdir "$ID")/state")" failed state-file
+}
+
+test_manage_finish_unknown() {
+  sub finish nope
+  assert_rc 1
 }
 
 # ---- commit (23) ---------------------------------------------------------

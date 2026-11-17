@@ -22,6 +22,8 @@ stdout は JSON（`diff` `guide` `trailer` を除く）、進捗とエラーは 
 
 ジョブが `failed` で結果に `conversation` があれば、`subcon resume <id>` で途中の作業と agy の会話を引き継いで再開できる（新しい ID が返る。`wait` で待つ）。`conversation` が `null` なら票を出し直す。
 
+runner の pid が生きているのに進捗が無い（エージェントの作業は終わったがドライバがハング等）ときは、`wait --stall-after <秒>` が「全ての未完ジョブがその時間ファイル更新なし」で早期に返る。`subcon show` の `activity_age` が最終更新からの秒数。仕事が済んでいるなら `subcon finish <id>` で runner を止めて `patch.diff` 付きの `failed` として回収できる（ジョブは消えない。`discard` との違い）。
+
 ## 既定は自分でやる
 
 次の 3 つを**全部**満たすときだけ Flash に渡す。1 つでも欠けたら自分で実装する。

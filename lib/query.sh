@@ -39,6 +39,7 @@ job_result() {
       --arg ticket "$ticket" \
       --arg state "$state" \
       --argjson issue "$issue" \
+      --argjson activity_age "$(job_activity_age "$dir")" \
       '{
         v: 1,
         id: $id,
@@ -53,7 +54,8 @@ job_result() {
         error: null,
         agy_error: null,
         conversation: null,
-        issue: $issue
+        issue: $issue,
+        activity_age: $activity_age
       }'
   else
     if [[ -f "$dir/result.json" ]]; then
@@ -102,26 +104,31 @@ cmd_show() {
 }
 
 cmd_wait() {
-  local timeout=0
+  local timeout=0 stall_after=0
   local ids=()
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --timeout)
-        [[ $# -ge 2 ]] || die "--timeout requires a value"
-        local timeout_arg="$2"
+      --timeout|--stall-after)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        local opt_name="${1#--}" timeout_arg="$2" secs
         if [[ "$timeout_arg" =~ ^[0-9]+$ ]]; then
-          timeout="$(( 10#$timeout_arg ))"
+          secs="$(( 10#$timeout_arg ))"
         elif [[ "$timeout_arg" =~ ^([0-9]+)([smh])$ ]]; then
           local n="${BASH_REMATCH[1]}"
           local u="${BASH_REMATCH[2]}"
           case "$u" in
-            s) timeout="$(( 10#$n ))" ;;
-            m) timeout="$(( 10#$n * 60 ))" ;;
-            h) timeout="$(( 10#$n * 3600 ))" ;;
+            s) secs="$(( 10#$n ))" ;;
+            m) secs="$(( 10#$n * 60 ))" ;;
+            h) secs="$(( 10#$n * 3600 ))" ;;
           esac
         else
-          die "invalid --timeout: $timeout_arg"
+          die "invalid --$opt_name: $timeout_arg"
+        fi
+        if [[ "$opt_name" == "timeout" ]]; then
+          timeout="$secs"
+        else
+          stall_after="$secs"
         fi
         shift 2
         ;;
@@ -153,6 +160,7 @@ cmd_wait() {
 
   while true; do
     local all_done=1
+    local unfinished=()
     local cur_results=()
     for id in "${ids[@]}"; do
       local res rc=0
@@ -165,6 +173,7 @@ cmd_wait() {
       st="$(jq -r .state <<<"$res")"
       if [[ "$st" == "queued" || "$st" == "running" ]]; then
         all_done=0
+        unfinished+=("$id")
       fi
     done
 
@@ -177,6 +186,22 @@ cmd_wait() {
       timed_out=1
       results_json="$(printf '%s\n' "${cur_results[@]}" | jq -sc .)"
       break
+    fi
+
+    if (( stall_after > 0 && ${#unfinished[@]} > 0 )); then
+      local stalled=1 uid age
+      for uid in "${unfinished[@]}"; do
+        age="$(job_activity_age "$(job_dir "$uid")")"
+        if [[ "$age" =~ ^[0-9]+$ ]] && (( age <= stall_after )); then
+          stalled=0
+          break
+        fi
+      done
+      if (( stalled == 1 )); then
+        echo "subcon: every unfinished job has been inactive for over ${stall_after}s" >&2
+        results_json="$(printf '%s\n' "${cur_results[@]}" | jq -sc .)"
+        break
+      fi
     fi
 
     sleep 0.5

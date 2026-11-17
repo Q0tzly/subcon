@@ -235,3 +235,34 @@ cmd_trailer() {
   [[ -n "$name" ]] || die "unknown model: $model (see: $driver models)"
   echo "Co-Authored-By: $name <$(coauthor_email "$name")>"
 }
+
+# file_mtime <path>: last-modified time as seconds since epoch (0 on failure).
+file_mtime() {
+  local m
+  m="$(date -r "$1" +%s 2>/dev/null || true)"
+  if [[ -z "$m" ]]; then
+    m="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0)"
+  fi
+  echo "$m"
+}
+
+# job_activity_age <job-dir>: seconds since the newest write under the job dir —
+# top-level artifacts plus the whole work/ tree (the agent's real progress).
+# -1 when nothing datable is found.
+job_activity_age() {
+  local dir="$1" now newest=0 m f
+  now="$(date +%s)"
+  for f in "$dir"/*; do
+    [[ -f "$f" ]] || continue
+    m="$(file_mtime "$f")"
+    [[ "$m" =~ ^[0-9]+$ ]] && (( m > newest )) && newest=$m
+  done
+  if [[ -d "$dir/work" ]]; then
+    local sflag sfmt
+    if stat -f %m / >/dev/null 2>&1; then sflag=-f; sfmt=%m; else sflag=-c; sfmt=%Y; fi
+    m="$(find "$dir/work" \( -name .git -o -name node_modules \) -prune -o -type f \
+        -exec stat "$sflag" "$sfmt" {} + 2>/dev/null | sort -rn | head -n 1)"
+    [[ "$m" =~ ^[0-9]+$ ]] && (( m > newest )) && newest=$m
+  fi
+  if (( newest == 0 )); then echo -1; else echo $(( now - newest )); fi
+}

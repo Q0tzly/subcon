@@ -16,9 +16,10 @@ usage() {
   cat >&2 <<USAGE
 usage: subcon new <feature>/<NN-name>
        subcon submit [--runner R] [--model M] [--driver D] [--timeout T] <ticket>...
-       subcon wait [--timeout SEC] <id>...
+       subcon wait [--timeout SEC] [--stall-after SEC] <id>...
        subcon run [--runner R] [--model M] [--driver D] [--timeout T] <ticket>
        subcon resume [--timeout T] <id>
+       subcon finish <id>
        subcon show <id>
        subcon list [--all]
        subcon diff <id>
@@ -52,6 +53,7 @@ case "$cmd" in
   wait) cmd_wait "$@" ;;
   run) cmd_run "$@" ;;
   resume) cmd_resume "$@" ;;
+  finish) cmd_finish "$@" ;;
   show) cmd_show "$@" ;;
   list) cmd_list "$@" ;;
   diff) cmd_diff "$@" ;;

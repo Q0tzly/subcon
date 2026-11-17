@@ -368,6 +368,61 @@ cmd_resume() {
   return "$rc"
 }
 
+cmd_finish() {
+  local id="${1:-}"
+  [[ -n "$id" ]] || die "finish: job id required"
+  local d
+  d="$(job_dir "$id")"
+  [[ -d "$d" ]] || die "unknown job id: $id"
+
+  # Settle first: a dead runner is finalized to failed by job_result.
+  job_result "$id" >/dev/null || true
+  local state
+  state="$(cat "$d/state" 2>/dev/null || echo "")"
+  [[ "$state" == "queued" || "$state" == "running" ]] || die "job $id is already $state"
+
+  local runner
+  runner="$(jq -r .runner "$d/meta.json")"
+  [[ "$runner" == "local" ]] || die "finish is only supported for the local runner (runner: $runner)"
+
+  local pid=""
+  [[ -f "$d/pid" ]] && pid="$(cat "$d/pid" 2>/dev/null || echo "")"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    # Guard against PID reuse: only signal a process that is this job's wrapper.
+    local pcmd
+    pcmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ "$pcmd" == *"__exec"* && "$pcmd" == *"$d"* ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      local w=0
+      while (( w < 150 )); do
+        state="$(cat "$d/state" 2>/dev/null || echo "")"
+        [[ "$state" == "finished" || "$state" == "failed" ]] && break
+        sleep 0.1
+        w=$((w + 1))
+      done
+      state="$(cat "$d/state" 2>/dev/null || echo "")"
+      if [[ "$state" != "finished" && "$state" != "failed" ]]; then
+        echo "subcon: runner did not exit; killing it" >&2
+        pkill -KILL -P "$pid" 2>/dev/null || true
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+    else
+      echo "subcon: warning: pid $pid is not this job's runner; leaving it alone" >&2
+    fi
+  fi
+
+  job_result "$id" >/dev/null || true
+  state="$(cat "$d/state" 2>/dev/null || echo "")"
+  if [[ "$state" != "finished" && "$state" != "failed" ]]; then
+    job_finalize "$d" died
+  fi
+
+  local res
+  res="$(job_result "$id")"
+  printf '%s\n' "$res"
+  exit_code_for "$res"
+}
+
 job_exec() {
   local job_dir="${1:-}"
   [[ -n "$job_dir" && -d "$job_dir" ]] || die "job directory not found: $job_dir"
