@@ -17,21 +17,32 @@ case "${1:-}" in
     ;;
   models)
     printf '%s\t%s\n' \
-      "sakura/preview/Kimi-K2.7-Code" "Kimi K2.7 Code (Sakura)" \
-      "sakura/gpt-oss-120b" "gpt-oss-120b (Sakura)"
+      "sakura-ai-engine/preview/Kimi-K2.7-Code" "Kimi K2.7 Code (Sakura)" \
+      "sakura-ai-engine/preview/Kimi-K2.6" "Kimi K2.6 (Sakura)" \
+      "sakura-ai-engine/Qwen3-Coder-480B-A35B-Instruct-FP8" "Qwen3 Coder 480B (Sakura)"
     exit 0
     ;;
   default-model)
-    echo "${SUBCON_OPENCODE_DEFAULT_MODEL:-sakura/preview/Kimi-K2.7-Code}"
+    echo "${SUBCON_OPENCODE_DEFAULT_MODEL:-sakura-ai-engine/preview/Kimi-K2.7-Code}"
     exit 0
     ;;
 esac
 
-case "${SUBCON_ROLE:-implement}" in
-  implement) ;;
-  review) echo "drivers/opencode: the review role is not supported" >&2; exit 1 ;;
+role="${SUBCON_ROLE:-implement}"
+case "$role" in
+  implement|review) ;;
   *) echo "drivers/opencode: unknown role: ${SUBCON_ROLE}" >&2; exit 1 ;;
 esac
+
+if [[ "$role" == review ]]; then
+  # A reviewer only reads: drop --dangerously-skip-permissions and install a
+  # project config that denies every writing or network tool. The file is
+  # removed again after the run so the caller's untouched-check stays clean;
+  # if the driver is killed first the leftover file counts as a modification.
+  cat > opencode.json <<'JSON'
+{"permission":{"edit":"deny","bash":"deny","webfetch":"deny","websearch":"deny","todowrite":"deny","task":"deny","question":"deny","external_directory":"deny"}}
+JSON
+fi
 
 job_dir="${1:?job directory required}"
 [[ "$job_dir" = /* ]] || job_dir="$(pwd)/$job_dir"
@@ -72,8 +83,11 @@ kill_tree() {
 
 # start_opencode: run opencode in the background, stdout straight into the stream file.
 # The stream is truncated on every attempt, so only the final run is parsed.
+# A review runs without --dangerously-skip-permissions so the deny config applies.
+perm_args=()
+[[ "$role" == review ]] || perm_args=(--dangerously-skip-permissions)
 start_opencode() {
-  ${timeout_cmd[@]+"${timeout_cmd[@]}"} opencode run --format json --dangerously-skip-permissions \
+  ${timeout_cmd[@]+"${timeout_cmd[@]}"} opencode run --format json ${perm_args[@]+"${perm_args[@]}"} \
     -m "$SUBCON_JOB_MODEL" ${session_args[@]+"${session_args[@]}"} -- "$prompt" \
     < /dev/null > "$stream" &
   oc_pid=$!
@@ -117,6 +131,7 @@ while :; do
   wait "$oc_pid" || oc_rc=$?
   break
 done
+[[ "$role" == review ]] && rm -f opencode.json
 duration=$((SECONDS - start_time))
 
 # Step 3: conversation ID from the first event that carries one (best effort).
@@ -143,12 +158,20 @@ jq -cn \
   --arg sid "$conversation" \
   --argjson dur "$duration" \
   --argjson usage "$usage" \
-  --argjson rc "$oc_rc" '
+  --argjson rc "$oc_rc" \
+  --arg role "$role" '
   def obj: fromjson? | select(type == "object");
   def valid:
     (type == "object")
-    and (((["status", "summary", "files_changed", "commands_run", "design_questions", "issues_found"]) - keys) == [])
-    and (.status == "done" or .status == "partial" or .status == "blocked");
+    and (
+      if $role == "review" then
+        (((["verdict", "summary", "findings", "unverified"]) - keys) == [])
+        and (.verdict == "approve" or .verdict == "changes" or .verdict == "reject")
+      else
+        (((["status", "summary", "files_changed", "commands_run", "design_questions", "issues_found"]) - keys) == [])
+        and (.status == "done" or .status == "partial" or .status == "blocked")
+      end
+    );
   (first(
      ($t | obj),
      ($t | capture("```json\\s*(?<j>[\\s\\S]*?)```")? | .j | obj),

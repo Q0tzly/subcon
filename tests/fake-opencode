@@ -14,6 +14,9 @@ set -uo pipefail
 
 session="ses-fake-1"
 message=""
+[[ -n "${FAKE_OPENCODE_LOG:-}" ]] && printf '%s\n' "$0" "$@" > "$FAKE_OPENCODE_LOG"
+# A review run gets a project opencode.json with deny rules; keep a copy for assertions.
+[[ -n "${FAKE_OPENCODE_LOG:-}" && -f opencode.json ]] && cp opencode.json "$FAKE_OPENCODE_LOG.config"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --session) session="$2"; shift 2 ;;
@@ -34,6 +37,24 @@ if [[ "$mode" == "stall" ]]; then
     exit 0
   fi
   mode="ok"
+fi
+
+# A review run changes nothing and answers with the review schema.
+if [[ "${SUBCON_ROLE:-implement}" == "review" ]]; then
+  jq -cn --arg s "$session" '{type: "step_start", sessionID: $s, part: {type: "step-start", sessionID: $s}}'
+  if [[ "$mode" == "error" ]]; then
+    exit 1
+  fi
+  report="$(jq -cn '{verdict: "changes", summary: "fake opencode review", findings: [{severity: "S2", file: "README.md", line: 1, summary: "fake finding", failure_scenario: "fake", fix: "fake"}], unverified: []}')"
+  case "$mode" in
+    fenced) text="$(printf '```json\n%s\n```' "$report")" ;;
+    prose) text="$(printf 'Review done.\n%s\nThat is all.' "$report")" ;;
+    noreport) text="I reviewed but wrote no JSON." ;;
+    *) text="$report" ;;
+  esac
+  jq -cn --arg s "$session" --arg t "$text" '{type: "text", sessionID: $s, part: {type: "text", text: $t}}'
+  jq -cn --arg s "$session" '{type: "step_finish", sessionID: $s, part: {type: "step-finish", cost: 0, tokens: {total: 60, input: 50, output: 8, reasoning: 2, cache: {read: 3, write: 1}}}}'
+  exit 0
 fi
 
 # A resumed run gets no ticket (the session remembers it): continue on the

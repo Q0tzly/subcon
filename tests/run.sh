@@ -1964,7 +1964,7 @@ test_driver_opencode_ok() {
   local d
   d="$(jobdir "$ID")"
   assert_eq "$(jq -r .driver "$d/meta.json")" opencode meta.driver
-  assert_eq "$(jq -r .model "$d/meta.json")" sakura/preview/Kimi-K2.7-Code meta.model
+  assert_eq "$(jq -r .model "$d/meta.json")" sakura-ai-engine/preview/Kimi-K2.7-Code meta.model
   assert_eq "$(result "$ID" .status)" done status
   assert_eq "$(result "$ID" .report.summary)" "fake opencode did it" report.summary
   assert_eq "$(result "$ID" .conversation)" ses-fake-1 conversation
@@ -3176,11 +3176,16 @@ test_reviewdrv_claude_isolation() {
   grep -q -- '--session-id' "$T/claude.log" || fail "no fresh session id: $(cat "$T/claude.log")"
 }
 
-test_reviewdrv_opencode_refused() {
+test_reviewdrv_opencode_ok() {
   review_setup
+  export FAKE_OPENCODE_LOG="$T/oc.log"
   PATH="$(opencode_path):$PATH" run_review_driver opencode
-  assert_rc 1 || return 1
-  grep -q "review" "$T/err" || fail "stderr: $(cat "$T/err")"
+  assert_rc 0 || return 1
+  assert_eq "$(jq -r .structured_output.verdict "$T/rj/agy.json")" changes verdict
+  assert_eq "$(jq -r .status "$T/rj/agy.json")" SUCCESS status
+  grep -q '"edit":"deny"' "$T/oc.log.config" || fail "no deny config: $(cat "$T/oc.log.config" 2>/dev/null)"
+  ! grep -qx -- '--dangerously-skip-permissions' "$T/oc.log" || fail "review skipped permissions: $(cat "$T/oc.log")"
+  assert_eq "$(git -C "$T/rw" status --porcelain)" "" clone-untouched
 }
 
 # ---- subcon review <job-id> (ticket 60) ---------------------------------------
@@ -3317,12 +3322,14 @@ test_reviewjob_concurrent_reviews_get_distinct_numbers() {
   assert_eq "$(cat "$T/o1" "$T/o2" | jq -r .id | sort | tr '\n' ' ')" "$ID-r1 $ID-r2 " ids
 }
 
-test_reviewjob_opencode_refusal_is_explained() {
+test_reviewjob_opencode_ok() {
   finished_job || return 1
   rtmp
   PATH="$(opencode_path):$PATH" sub review --driver opencode "$ID"
-  assert_rc 4 || return 1
-  assert_match "$(jget .error)" 'not supported' error
+  assert_rc 0 || return 1
+  assert_eq "$(jget .verdict)" changes verdict
+  assert_eq "$(jq -r '[.driver,.model] | join("|")' "$(jobdir "$ID")/review-1.meta.json")" \
+    "opencode|sakura-ai-engine/preview/Kimi-K2.7-Code" meta
 }
 
 test_reviewjob_unknown_and_unfinished() {
