@@ -9,6 +9,8 @@ coauthor_email() {
   case "$1" in
     Claude*) echo "noreply@anthropic.com" ;;
     Gemini*) echo "noreply@google.com" ;;
+    SWE*|Devin*) echo "noreply@devin.ai" ;;
+    GPT*|Codex*) echo "noreply@openai.com" ;;
     *) echo "$SUBCON_COAUTHOR_EMAIL" ;;
   esac
 }

@@ -3681,6 +3681,16 @@ test_reviewcommit_claude_reviewer_name() {
   grep -Fxq "Reviewed-By: Claude Haiku 5.5 <noreply@anthropic.com>" <<<"$MSG" || fail "reviewer trailer missing: $MSG"
 }
 
+test_reviewcommit_devin_reviewer_email() {
+  RV_DRIVER=devin RV_MODEL=swe-2-flash commit_with_review approve || return 1
+  grep -Fxq "Reviewed-By: SWE-2 Flash <noreply@devin.ai>" <<<"$MSG" || fail "reviewer trailer missing: $MSG"
+}
+
+test_reviewcommit_codex_reviewer_email() {
+  RV_DRIVER=codex RV_MODEL=gpt-6-luna commit_with_review approve || return 1
+  grep -Fxq "Reviewed-By: GPT-6 Luna <noreply@openai.com>" <<<"$MSG" || fail "reviewer trailer missing: $MSG"
+}
+
 test_reviewcommit_unknown_driver_falls_back_to_the_model_id() {
   RV_DRIVER=gone RV_MODEL=x-1 commit_with_review approve || return 1
   grep -Fxq "Reviewed-By: x-1 <noreply@google.com>" <<<"$MSG" || fail "fallback trailer missing: $MSG"
