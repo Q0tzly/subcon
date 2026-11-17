@@ -690,6 +690,20 @@ test_query_wait_stall_after_fresh() {
   assert_rc 5
 }
 
+# A ci-runner job stays static locally while healthy on the runner, so it
+# must block the stall early-return (timeout hits instead).
+test_query_wait_stall_after_ci_runner() {
+  local d="$SUBCON_STATE/jobs/20990101-000000-ci-stall"
+  mkdir -p "$d"
+  echo running > "$d/state"
+  sleep 300 &
+  echo "$!" > "$d/pid"
+  jq -n '{v:1,id:"20990101-000000-ci-stall",repo:"x",ticket:null,runner:"ci",model:"m",driver:"d",timeout:"1h",created_at:"2026-01-01T00:00:00Z"}' > "$d/meta.json"
+  touch "$d/log"
+  sub wait --stall-after 1 --timeout 3 20990101-000000-ci-stall
+  assert_rc 5
+}
+
 test_query_wait_stall_after_invalid() {
   submit_one docs/t/01-a.md || return 1
   wait_done "$ID" || return 1

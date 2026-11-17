@@ -161,6 +161,7 @@ cmd_wait() {
   while true; do
     local all_done=1
     local unfinished=()
+    local unfinished_age=()
     local cur_results=()
     for id in "${ids[@]}"; do
       local res rc=0
@@ -174,6 +175,7 @@ cmd_wait() {
       if [[ "$st" == "queued" || "$st" == "running" ]]; then
         all_done=0
         unfinished+=("$id")
+        unfinished_age+=("$(jq -r '.activity_age // -1' <<<"$res")")
       fi
     done
 
@@ -189,9 +191,20 @@ cmd_wait() {
     fi
 
     if (( stall_after > 0 && ${#unfinished[@]} > 0 )); then
-      local stalled=1 uid age
-      for uid in "${unfinished[@]}"; do
-        age="$(job_activity_age "$(job_dir "$uid")")"
+      # Only a running local-runner job writes files locally; ci/container
+      # jobs and queued jobs stay static while healthy, so they block the
+      # early return instead of counting as stalled.
+      local stalled=1 i uid age ud urunner ustate
+      for (( i = 0; i < ${#unfinished[@]}; i++ )); do
+        uid="${unfinished[$i]}"
+        ud="$(job_dir "$uid")"
+        ustate="$(cat "$ud/state" 2>/dev/null || echo "")"
+        urunner="$(jq -r '.runner // "local"' "$ud/meta.json" 2>/dev/null || echo "local")"
+        if [[ "$ustate" != "running" || "$urunner" != "local" ]]; then
+          stalled=0
+          break
+        fi
+        age="${unfinished_age[$i]}"
         if [[ "$age" =~ ^[0-9]+$ ]] && (( age <= stall_after )); then
           stalled=0
           break

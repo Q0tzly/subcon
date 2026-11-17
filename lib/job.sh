@@ -402,9 +402,23 @@ cmd_finish() {
       done
       state="$(cat "$d/state" 2>/dev/null || echo "")"
       if [[ "$state" != "finished" && "$state" != "failed" ]]; then
+        # The wrapper writes the terminal state before removing work/, and
+        # its EXIT trap may still be running: kill the whole descendant
+        # tree (grandchildren like agy would otherwise be orphaned inside
+        # work/) and finalize directly.
         echo "subcon: runner did not exit; killing it" >&2
-        pkill -KILL -P "$pid" 2>/dev/null || true
-        kill -KILL "$pid" 2>/dev/null || true
+        local tree
+        tree="$(pid_descendants "$pid")"
+        # shellcheck disable=SC2086
+        kill -KILL $tree 2>/dev/null || true
+      else
+        # Wait for the wrapper itself: state flips before its finalize
+        # finishes deleting the worktree.
+        w=0
+        while kill -0 "$pid" 2>/dev/null && (( w < 100 )); do
+          sleep 0.1
+          w=$((w + 1))
+        done
       fi
     else
       echo "subcon: warning: pid $pid is not this job's runner; leaving it alone" >&2

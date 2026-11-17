@@ -266,3 +266,14 @@ job_activity_age() {
   fi
   if (( newest == 0 )); then echo -1; else echo $(( now - newest )); fi
 }
+
+# pid_descendants <pid>: the pid plus all descendants, one per line.
+# Collect before killing: once a parent dies its children reparent and
+# pgrep -P can no longer reach them.
+pid_descendants() {
+  local p="$1" c
+  echo "$p"
+  for c in $(pgrep -P "$p" 2>/dev/null); do
+    pid_descendants "$c"
+  done
+}

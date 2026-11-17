@@ -23,9 +23,13 @@ detected once per call; ~50 ms on a large worktree).
 Same duration syntax as `--timeout` (`N`, `Ns`, `Nm`, `Nh`). Each poll, after
 the all-done and timeout checks: if every unfinished job has
 `activity_age > stall_after` (or `-1`), `wait` returns early with the current
-results and a stderr note. A single progressing job keeps the wait alive.
-Return code stays `exit_code_for`-based; callers detect the early return via
-the stderr note and the `activity_age` field. Default `0` = disabled.
+results and a stderr note. Default `0` = disabled.
+
+Only `state=running` jobs with `runner=local` are stall-eligible: ci and
+container jobs do their work off-box (local files stay static while
+healthy) and queued jobs have not started, so either one blocks the early
+return rather than counting as stalled. Ages come from the `activity_age`
+field `job_result` already computed in the same poll (no rescan).
 
 ### `subcon finish <id>`
 
@@ -37,9 +41,14 @@ Manually close a stuck local-runner job and keep its artifacts:
    `subcon __exec <dir>` before signalling (guards PID reuse).
 4. `TERM` the wrapper: its trap kills the runner tree and its `EXIT` trap
    runs `job_finalize` → `failed` + `patch.diff` from `work/`.
-5. Wait up to 15 s for a terminal state; if none, `KILL` the wrapper and its
-   direct children, then `job_finalize "$dir" died` directly (idempotent).
-6. Print the final `job_result` JSON.
+5. Wait up to 15 s for a terminal state, then up to 10 s more for the
+   wrapper pid to exit (`job_finalize` writes `state` before removing the
+   worktree, so terminal state alone does not mean cleanup finished).
+6. If still not terminal, `KILL` the whole descendant tree
+   (`pid_descendants`; grandchildren like agy would otherwise be orphaned
+   inside `work/`) and call `job_finalize "$dir" died` directly
+   (idempotent).
+7. Print the final `job_result` JSON with `exit_code_for` semantics.
 
 `finish` never deletes the job dir; `patch.diff`, `result.json`, and history
 survive, so `subcon diff/apply` work on the collected work.
